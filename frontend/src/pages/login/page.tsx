@@ -25,7 +25,7 @@ export default function LoginPage() {
     setIsLoading(false);
 
     if (result.success) {
-      navigate("/editor");
+      navigate("/projects");
     } else {
       setError(result.error || "오류가 발생했습니다.");
     }
