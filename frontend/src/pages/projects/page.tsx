@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { listProjects, createProject } from "@/lib/projectApi";
 
 interface Project {
   id: string;
@@ -27,24 +27,19 @@ export default function ProjectsPage() {
         setIsLoading(true);
         setError("");
 
-        const { data, error: sbError } = await supabase
-          .from("projects")
-          .select("*")
-          .order("updated_at", { ascending: false });
-
-        if (sbError) throw sbError;
-
-        // 에피소드 수 & 컷 수는 별도로 세거나, 나중에 join으로 가져올 수 있음
-        // 일단 기본값 0으로 설정
-        const list: Project[] = (data ?? []).map((p) => ({
-          id: p.id,
-          title: p.title,
-          description: p.description ?? "",
-          thumbnail_url: p.thumbnail_url,
-          episodeCount: 0,
+        const summaries = await listProjects();
+        // backend ProjectSummary → frontend Project 매핑.
+        // description/thumbnail_url/cutCount/status는 backend에 없음 → default
+        // updatedAt 없음 → createdAt 사용 (1-C 후속에서 backend 보강 시 정확해짐)
+        const list: Project[] = summaries.map((s) => ({
+          id: String(s.projectId),
+          title: s.title,
+          description: null,
+          thumbnail_url: null,
+          episodeCount: s.episodeCount,
           cutCount: 0,
-          lastEdited: p.updated_at ?? p.created_at,
-          status: (p.status as Project["status"]) ?? "draft",
+          lastEdited: s.createdAt,
+          status: "draft",
         }));
 
         setProjects(list);
@@ -76,29 +71,16 @@ export default function ProjectsPage() {
     }
     try {
       setError("");
-      const { data, error: sbError } = await supabase
-        .from("projects")
-        .insert({
-          title: "새 프로젝트",
-          description: "",
-          status: "draft",
-          user_id: user.id,
-        })
-        .select()
-        .single();
-
-      if (sbError) throw sbError;
-      if (!data) throw new Error("프로젝트 생성에 실패했습니다.");
-
+      const created = await createProject({ title: "새 프로젝트" });
       const newProject: Project = {
-        id: data.id,
-        title: data.title,
-        description: data.description ?? "",
-        thumbnail_url: data.thumbnail_url,
+        id: String(created.projectId),
+        title: created.title,
+        description: null,
+        thumbnail_url: null,
         episodeCount: 0,
         cutCount: 0,
-        lastEdited: data.updated_at ?? data.created_at,
-        status: (data.status as Project["status"]) ?? "draft",
+        lastEdited: created.createdAt,
+        status: "draft",
       };
 
       setProjects((prev) => [newProject, ...prev]);
