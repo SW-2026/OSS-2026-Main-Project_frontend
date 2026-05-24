@@ -6,6 +6,7 @@ import {
   updateEpisode,
   deleteEpisode as apiDeleteEpisode,
 } from "@/lib/episodeApi";
+import { listPanels, createPanel } from "@/lib/panelApi";
 import type { BalloonItem, BalloonShape } from "@/pages/home/components/BalloonPanel";
 import type { AIGeneratedImage } from "@/pages/home/components/AIImagePanel";
 
@@ -158,27 +159,24 @@ export function useEditorState(initialProjectId?: string | null) {
           isActive: false,
         }));
 
-        // 컷 로드
-        const { data: cutData, error: cutError } = await supabase
-          .from("cuts")
-          .select("*")
-          .in(
-            "episode_id",
-            loadedEpisodes.map((e) => e.id)
+        // 컷 로드 — episode별 backend listPanels 병렬 호출 (Promise.all)
+        // label은 backend Panel에 없음 → `컷 ${panelOrder}` 자동 생성
+        const panelsByEpisode = await Promise.all(
+          loadedEpisodes.map((e) =>
+            listPanels(Number(e.id)).then((panels) =>
+              panels.map((p) => ({ episodeId: e.id, panel: p }))
+            )
           )
-          .order("order_index", { ascending: true });
-
-        if (cutError) throw cutError;
-
-        const loadedCuts: Cut[] = (cutData ?? []).map((c: any) => ({
-          id: c.id,
-          index: c.order_index ?? 1,
-          label: c.label ?? `컷 ${c.order_index ?? 1}`,
-          prompt: c.prompt ?? "",
-          thumbnail: c.thumbnail_url ?? "",
+        );
+        const loadedCuts: Cut[] = panelsByEpisode.flat().map(({ episodeId, panel }) => ({
+          id: String(panel.panelId),
+          index: panel.panelOrder,
+          label: `컷 ${panel.panelOrder}`,
+          prompt: panel.prompt ?? "",
+          thumbnail: panel.finalImageUrl ?? "",
           isActive: false,
-          isGenerated: false,
-          episodeId: c.episode_id,
+          isGenerated: panel.status === "COMPLETED",
+          episodeId,
         }));
 
         if (loadedEpisodes.length === 0) {
@@ -640,19 +638,16 @@ export function useEditorState(initialProjectId?: string | null) {
       return;
     }
 
-    const { data: cutData, error: cutError } = await supabase
-      .from("cuts")
-      .insert({ episode_id: newEpId, label: "컷 1", order_index: 1 })
-      .select()
-      .single();
-
-    if (cutError || !cutData) {
+    // 빈 Panel 생성 — backend panelOrder = lastOrder+1 자동 부여
+    let newCutId: string;
+    try {
+      const panelId = await createPanel(Number(newEpId));
+      newCutId = String(panelId);
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[useEditorState] 컷 생성 실패:", cutError);
+      console.error("[useEditorState] 컷 생성 실패:", err);
       return;
     }
-
-    const newCutId = cutData.id;
 
     const newEpisode: Episode = { id: newEpId, title: newTitle, isActive: true };
     const newCut: Cut = {
@@ -682,19 +677,17 @@ export function useEditorState(initialProjectId?: string | null) {
     const currentCuts = cutsRef.current.filter((c) => c.episodeId === currentEpId);
     const nextIndex = currentCuts.length > 0 ? Math.max(...currentCuts.map((c) => c.index)) + 1 : 1;
 
-    const { data: cutData, error: cutError } = await supabase
-      .from("cuts")
-      .insert({ episode_id: currentEpId, label: `컷 ${nextIndex}`, order_index: nextIndex })
-      .select()
-      .single();
-
-    if (cutError || !cutData) {
+    // 빈 Panel 생성 — backend panelOrder = lastOrder+1 (client nextIndex와 동일 예상)
+    // 멀티 사용자 race 시 불일치 가능 (현재 검증 1명 범위, 별도 작업으로 보강 가능)
+    let newCutId: string;
+    try {
+      const panelId = await createPanel(Number(currentEpId));
+      newCutId = String(panelId);
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[useEditorState] 컷 생성 실패:", cutError);
+      console.error("[useEditorState] 컷 생성 실패:", err);
       return;
     }
-
-    const newCutId = cutData.id;
     const newCut: Cut = {
       id: newCutId,
       index: nextIndex,
