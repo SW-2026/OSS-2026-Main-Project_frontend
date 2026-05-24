@@ -8,15 +8,11 @@ import {
   type CharacterModelDetail,
 } from "@/lib/characterApi";
 
-// ⚠️ 검증용 임시 hardcoded
-// TODO(1-C): Episode/Project CRUD를 backend로 통합한 후 — 하단 timeline의 episodeId(Supabase string UUID)를
-//            backend Long으로 전환 → 두 상수 모두 제거, 활성 프로젝트/에피소드에서 가져오기.
-// 사용 전 사용자 측 준비:
-//   curl POST /api/projects {title,genre} → projectId
-//   curl POST /api/projects/{id}/episodes {epNumber,epTitle} → episodeId
-//   두 ID를 아래 상수로 교체.
-const VERIFY_PROJECT_ID = 1;
-const VERIFY_EPISODE_ID = 1;
+// 활성 프로젝트/에피소드 ID — useEditorState에서 LeftPanel → 본 컴포넌트로 prop 전달
+interface ScenarioGeneratePanelProps {
+  projectId: string | null;   // useEditorState.activeProjectId (URL에서 옴, string)
+  episodeId: string;          // useEditorState.activeEpisodeId (string, 가짜는 "ep-..." prefix)
+}
 
 const MIN_SCENARIO_LENGTH = 50;
 const BASE_URL =
@@ -27,7 +23,16 @@ function resolveImageUrl(path: string): string {
   return path.startsWith("http") ? path : `${BASE_URL}${path}`;
 }
 
-export default function ScenarioGeneratePanel() {
+export default function ScenarioGeneratePanel({
+  projectId,
+  episodeId,
+}: ScenarioGeneratePanelProps) {
+  // backend ID 변환 (string → number). 가짜(`ep-...`/`cut-...`)나 null이면 NaN
+  const projectIdNum = projectId != null ? Number(projectId) : NaN;
+  const episodeIdNum = Number(episodeId);
+  const isValidProject = !Number.isNaN(projectIdNum);
+  const isValidEpisode = !Number.isNaN(episodeIdNum);
+
   const [scenarioText, setScenarioText] = useState("");
   const { status, progress, panels, error, start } = usePanelGeneration();
 
@@ -50,7 +55,12 @@ export default function ScenarioGeneratePanel() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
-    listCharacters(VERIFY_PROJECT_ID)
+    if (!isValidProject) {
+      setIsLoadingCharacters(false);
+      return;
+    }
+    setIsLoadingCharacters(true);
+    listCharacters(projectIdNum)
       .then((list) => setCharacters(list))
       .catch((e) =>
         setCharactersError(
@@ -58,7 +68,7 @@ export default function ScenarioGeneratePanel() {
         )
       )
       .finally(() => setIsLoadingCharacters(false));
-  }, []);
+  }, [projectIdNum, isValidProject]);
 
   const toggleCharacter = async (modelId: number) => {
     const newSelected = new Set(selectedIds);
@@ -80,12 +90,12 @@ export default function ScenarioGeneratePanel() {
   };
 
   const handleCreate = async () => {
-    if (!newName.trim() || !newImage || isCreating) return;
+    if (!newName.trim() || !newImage || isCreating || !isValidProject) return;
     setIsCreating(true);
     setCreateError(null);
     try {
       const created = await createCharacter(
-        VERIFY_PROJECT_ID,
+        projectIdNum,
         {
           modelName: newName.trim(),
           triggerWord: newTrigger.trim() || undefined,
@@ -124,7 +134,7 @@ export default function ScenarioGeneratePanel() {
   const tooShort = trimmedLen < MIN_SCENARIO_LENGTH;
 
   const handleGenerate = () => {
-    if (tooShort || isRunning) return;
+    if (tooShort || isRunning || !isValidEpisode) return;
     const mentions = [...selectedIds].map((id) => {
       const detail = characterDetailCache[id];
       const summary = characters.find((c) => c.modelId === id);
@@ -135,7 +145,7 @@ export default function ScenarioGeneratePanel() {
         loraModelPath: detail?.loraModelPath ?? null,
       };
     });
-    start(VERIFY_EPISODE_ID, {
+    start(episodeIdNum, {
       scenarioText: scenarioText.trim(),
       characters: mentions,
     });
@@ -143,13 +153,14 @@ export default function ScenarioGeneratePanel() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      {/* 헤더 */}
+      {/* 헤더 — 활성 프로젝트/에피소드의 backend ID 표시 */}
       <div className="px-3 py-2 border-b border-[#2a2a2a] shrink-0">
         <p className="text-[10px] text-[#888]">
-          backend 시나리오→컷 파이프라인 검증용
+          backend 시나리오→컷 파이프라인
         </p>
         <p className="text-[9px] text-[#555] mt-0.5">
-          projectId: {VERIFY_PROJECT_ID} · episodeId: {VERIFY_EPISODE_ID} · 하단 timeline과는 별개
+          projectId: {isValidProject ? projectIdNum : "—"} · episodeId: {isValidEpisode ? episodeIdNum : "—"}
+          {(!isValidProject || !isValidEpisode) && " · 활성 프로젝트/에피소드 필요"}
         </p>
       </div>
 
@@ -242,7 +253,7 @@ export default function ScenarioGeneratePanel() {
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={!newName.trim() || !newImage || isCreating}
+                disabled={!newName.trim() || !newImage || isCreating || !isValidProject}
                 className="flex-1 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10px] font-semibold rounded cursor-pointer"
               >
                 {isCreating ? "등록 중..." : "등록"}
@@ -283,7 +294,7 @@ export default function ScenarioGeneratePanel() {
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={tooShort || isRunning}
+          disabled={tooShort || isRunning || !isValidEpisode}
           className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
         >
           {isRunning ? `생성 중... ${progress}%` : "생성"}

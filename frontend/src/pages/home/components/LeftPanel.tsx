@@ -46,6 +46,9 @@ interface LeftPanelProps {
   selectedBalloonId: string | null;
   updateBalloon: (id: string, updates: Partial<Omit<BalloonItem, "id">>) => void;
   balloons: BalloonItem[];
+  // 활성 프로젝트/에피소드 ID (ScenarioGeneratePanel로 전달) — 1-C-4
+  activeProjectId: string | null;
+  activeEpisodeId: string;
 }
 
 const BRUSH_PRESETS: { name: string; icon: string; size: number; opacity: number; tool: DrawingTool }[] = [
@@ -95,6 +98,8 @@ export default function LeftPanel({
   selectedBalloonId,
   updateBalloon,
   balloons,
+  activeProjectId,
+  activeEpisodeId,
 }: LeftPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("tool");
   const [selectedBrushPreset, setSelectedBrushPreset] = useState(0);
@@ -315,7 +320,12 @@ export default function LeftPanel({
       )}
 
       {/* 시나리오 탭 — backend 파이프라인 (Pollinations와 별개) */}
-      {activeTab === "scenario" && <ScenarioGeneratePanel />}
+      {activeTab === "scenario" && (
+        <ScenarioGeneratePanel
+          projectId={activeProjectId}
+          episodeId={activeEpisodeId}
+        />
+      )}
     </aside>
   );
 }
