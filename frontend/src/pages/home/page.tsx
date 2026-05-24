@@ -139,6 +139,8 @@ export default function WebtoonEditor() {
           selectedBalloonId={editor.selectedBalloonId}
           updateBalloon={editor.updateBalloon}
           balloons={editor.balloons}
+          activeProjectId={editor.activeProjectId}
+          activeEpisodeId={editor.activeEpisodeId}
         />
 
         <div className="flex flex-col flex-1 overflow-hidden">
