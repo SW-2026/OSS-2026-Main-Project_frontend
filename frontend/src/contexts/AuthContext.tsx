@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { supabase } from "@/lib/supabase";
+import axios from "axios";
+import { api, tokenStorage } from "@/lib/api";
 
 export interface User {
   id: string;
@@ -19,95 +20,80 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+interface MemberDetail {
+  memberId: number;
+  email: string;
+  nickname: string;
+  createdAt?: string;
+}
+
+function memberDetailToUser(m: MemberDetail): User {
+  return {
+    id: String(m.memberId),
+    email: m.email,
+    nickname: m.nickname,
+    avatar: m.nickname.charAt(0).toUpperCase(),
+    createdAt: m.createdAt,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        const u = session.user;
-        setUser({
-          id: u.id,
-          email: u.email ?? "",
-          nickname: (u.user_metadata?.nickname as string) || "사용자",
-          avatar: ((u.user_metadata?.nickname as string) || "사용자")?.charAt(0).toUpperCase(),
-          createdAt: u.created_at,
-        });
-      }
+    const token = tokenStorage.get();
+    if (!token) {
       setIsLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        const u = session.user;
-        setUser({
-          id: u.id,
-          email: u.email ?? "",
-          nickname: (u.user_metadata?.nickname as string) || "사용자",
-          avatar: ((u.user_metadata?.nickname as string) || "사용자")?.charAt(0).toUpperCase(),
-          createdAt: u.created_at,
-        });
-      } else {
+      return;
+    }
+    api.get<MemberDetail>("/api/members/me")
+      .then((res) => setUser(memberDetailToUser(res.data)))
+      .catch(() => {
+        tokenStorage.clear();
         setUser(null);
-      }
-    });
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        if (error.message.includes("Invalid login")) {
-          return { success: false, error: "이메일 또는 비밀번호가 올바르지 않습니다." };
-        }
-        return { success: false, error: error.message };
-      }
-      if (data.user) {
-        setUser({
-          id: data.user.id,
-          email: data.user.email ?? "",
-          nickname: (data.user.user_metadata?.nickname as string) || "사용자",
-          avatar: ((data.user.user_metadata?.nickname as string) || "사용자")?.charAt(0).toUpperCase(),
-          createdAt: data.user.created_at,
-        });
-      }
+      const tokenRes = await api.post<{ accessToken: string; tokenType: string }>(
+        "/api/members/login",
+        { email, password }
+      );
+      tokenStorage.set(tokenRes.data.accessToken);
+      const meRes = await api.get<MemberDetail>("/api/members/me");
+      setUser(memberDetailToUser(meRes.data));
       return { success: true };
-    } catch {
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        return { success: false, error: "이메일 또는 비밀번호가 올바르지 않습니다." };
+      }
       return { success: false, error: "로그인 중 오류가 발생했습니다." };
     }
   }, []);
 
   const signup = useCallback(async (email: string, password: string, nickname: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { nickname },
-        },
-      });
-      if (error) {
-        if (error.message.includes("already registered") || error.message.includes("중복")) {
+      await api.post("/api/members/register", { email, password, nickname });
+      return { success: true };
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        if (status === 409) {
           return { success: false, error: "이미 가입된 이메일입니다." };
         }
-        return { success: false, error: error.message };
+        if (status === 400) {
+          return { success: false, error: "입력값이 올바르지 않습니다." };
+        }
       }
-      if (data.user?.identities?.length === 0) {
-        return { success: false, error: "이미 가입된 이메일입니다." };
-      }
-      return { success: true };
-    } catch {
       return { success: false, error: "회원가입 중 오류가 발생했습니다." };
     }
   }, []);
 
   const logout = useCallback(async () => {
-    await supabase.auth.signOut();
+    tokenStorage.clear();
     setUser(null);
   }, []);
 
