@@ -1,5 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  listEpisodes,
+  createEpisode,
+  updateEpisode,
+  deleteEpisode as apiDeleteEpisode,
+} from "@/lib/episodeApi";
 import type { BalloonItem, BalloonShape } from "@/pages/home/components/BalloonPanel";
 import type { AIGeneratedImage } from "@/pages/home/components/AIImagePanel";
 
@@ -142,18 +148,13 @@ export function useEditorState(initialProjectId?: string | null) {
 
     const loadProject = async () => {
       try {
-        // 에피소드 로드
-        const { data: epData, error: epError } = await supabase
-          .from("episodes")
-          .select("*")
-          .eq("project_id", initialProjectId)
-          .order("order_index", { ascending: true });
-
-        if (epError) throw epError;
-
-        const loadedEpisodes: Episode[] = (epData ?? []).map((e: any) => ({
-          id: e.id,
-          title: e.title,
+        // 에피소드 로드 (backend)
+        const summaries = await listEpisodes(Number(initialProjectId));
+        // backend EpisodeSummary → frontend Episode 매핑 (id는 String 캐스팅).
+        // epNumber/panelCount는 frontend가 안 씀 — 무시.
+        const loadedEpisodes: Episode[] = summaries.map((s) => ({
+          id: String(s.episodeId),
+          title: s.epTitle,
           isActive: false,
         }));
 
@@ -625,19 +626,19 @@ export function useEditorState(initialProjectId?: string | null) {
     const newTitle = title ?? `에피소드 ${episodes.length + 1}`;
     const newOrder = episodes.length + 1;
 
-    const { data: epData, error: epError } = await supabase
-      .from("episodes")
-      .insert({ project_id: activeProjectId, title: newTitle, order_index: newOrder })
-      .select()
-      .single();
-
-    if (epError || !epData) {
+    // episode는 backend (1-C-2), cut은 Supabase 잔존 (1-C-3에서 정리)
+    let newEpId: string;
+    try {
+      const created = await createEpisode(Number(activeProjectId), {
+        epNumber: newOrder,
+        epTitle: newTitle,
+      });
+      newEpId = String(created.episodeId);
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[useEditorState] 에피소드 생성 실패:", epError);
+      console.error("[useEditorState] 에피소드 생성 실패:", err);
       return;
     }
-
-    const newEpId = epData.id;
 
     const { data: cutData, error: cutError } = await supabase
       .from("cuts")
@@ -715,11 +716,12 @@ export function useEditorState(initialProjectId?: string | null) {
   }, []);
 
   const deleteEpisode = useCallback(async (id: string) => {
-    // Supabase cascade delete (episodes → cuts → cut_data)
-    const { error } = await supabase.from("episodes").delete().eq("id", id);
-    if (error) {
+    // backend Episode DELETE — panels만 cascade. Supabase cuts/cut_data는 잔존 (1-C-3에서 정리)
+    try {
+      await apiDeleteEpisode(Number(id));
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[useEditorState] 에피소드 삭제 실패:", error);
+      console.error("[useEditorState] 에피소드 삭제 실패:", err);
       return;
     }
 
@@ -746,7 +748,13 @@ export function useEditorState(initialProjectId?: string | null) {
   }, []);
 
   const renameEpisode = useCallback(async (id: string, title: string) => {
-    await supabase.from("episodes").update({ title }).eq("id", id);
+    try {
+      await updateEpisode(Number(id), { epTitle: title });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[useEditorState] 에피소드 이름 변경 실패:", err);
+      return;
+    }
     setEpisodes((prev) => prev.map((ep) => ep.id === id ? { ...ep, title } : ep));
     setSaveStatus("saved");
   }, []);
