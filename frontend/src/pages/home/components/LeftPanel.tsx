@@ -5,8 +5,9 @@ import BalloonPanel from "./BalloonPanel";
 import type { BalloonShape, BalloonItem } from "./BalloonPanel";
 import AIImagePanel from "./AIImagePanel";
 import type { AIGeneratedImage } from "./AIImagePanel";
+import ScenarioGeneratePanel from "./ScenarioGeneratePanel";
 
-type TabType = "tool" | "library" | "ai" | "balloon";
+type TabType = "tool" | "library" | "ai" | "balloon" | "scenario";
 
 interface LeftPanelProps {
   activeTool: DrawingTool;
@@ -116,6 +117,7 @@ export default function LeftPanel({
     { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
     { key: "library", icon: "ri-image-2-line", label: "소재" },
     { key: "ai", icon: "ri-sparkling-line", label: "AI" },
+    { key: "scenario", icon: "ri-film-line", label: "시나리오" },
   ];
 
   const filteredItems = [
@@ -311,6 +313,9 @@ export default function LeftPanel({
           onImageLoad={onImageLoad}
         />
       )}
+
+      {/* 시나리오 탭 — backend 파이프라인 (Pollinations와 별개) */}
+      {activeTab === "scenario" && <ScenarioGeneratePanel />}
     </aside>
   );
 }
