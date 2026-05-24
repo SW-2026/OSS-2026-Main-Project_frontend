@@ -22,8 +22,8 @@ export default function RegisterPage() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("비밀번호는 6자 이상이어야 합니다.");
+    if (password.length < 8) {
+      setError("비밀번호는 8자 이상이어야 합니다.");
       return;
     }
 
@@ -126,7 +126,7 @@ export default function RegisterPage() {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="6자 이상 입력"
+                  placeholder="8자 이상 입력"
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl pl-9 pr-10 py-2.5 text-sm text-white placeholder-[#444] focus:outline-none focus:border-orange-500 transition-colors"
                 />
                 <button
