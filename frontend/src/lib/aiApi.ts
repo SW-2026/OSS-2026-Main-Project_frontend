@@ -30,6 +30,10 @@ export interface PanelDetailResponse {
   finalImageUrl: string | null;
   layoutData: string | null;
   prompt: string | null;
+  characterAssetId: number | null;
+  characterAssetUrl: string | null;
+  backgroundAssetId: number | null;
+  backgroundAssetUrl: string | null;
 }
 
 export interface CharacterMention {
