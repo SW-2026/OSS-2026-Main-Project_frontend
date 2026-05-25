@@ -39,9 +39,16 @@ export interface CharacterMention {
   loraModelPath?: string | null;
 }
 
+export interface BackgroundMention {
+  name: string;
+  assetId: number;
+  assetUrl?: string | null;
+}
+
 export interface PanelsGenerateRequest {
   scenarioText: string;
   characters: CharacterMention[];
+  backgrounds?: BackgroundMention[];
 }
 
 // === API calls — ApiResponse는 호출지점에서 풀음 (auth와 동일 패턴) ===
