@@ -6,8 +6,9 @@ import type { BalloonShape, BalloonItem } from "./BalloonPanel";
 import AIImagePanel from "./AIImagePanel";
 import type { AIGeneratedImage } from "./AIImagePanel";
 import ScenarioGeneratePanel from "./ScenarioGeneratePanel";
+import BackgroundLibraryPanel from "./BackgroundLibraryPanel";
 
-type TabType = "tool" | "library" | "ai" | "balloon" | "scenario";
+type TabType = "tool" | "library" | "ai" | "balloon" | "scenario" | "background";
 
 interface LeftPanelProps {
   activeTool: DrawingTool;
@@ -123,6 +124,7 @@ export default function LeftPanel({
     { key: "library", icon: "ri-image-2-line", label: "소재" },
     { key: "ai", icon: "ri-sparkling-line", label: "AI" },
     { key: "scenario", icon: "ri-film-line", label: "시나리오" },
+    { key: "background", icon: "ri-landscape-line", label: "배경" },
   ];
 
   const filteredItems = [
@@ -326,6 +328,9 @@ export default function LeftPanel({
           episodeId={activeEpisodeId}
         />
       )}
+
+      {/* 배경 탭 — backend 배경 라이브러리 (Member 단위) */}
+      {activeTab === "background" && <BackgroundLibraryPanel />}
     </aside>
   );
 }
