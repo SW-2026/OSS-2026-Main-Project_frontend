@@ -7,6 +7,10 @@ import {
   type CharacterModelSummary,
   type CharacterModelDetail,
 } from "@/lib/characterApi";
+import {
+  listBackgrounds,
+  type BackgroundAssetSummary,
+} from "@/lib/backgroundApi";
 
 // 활성 프로젝트/에피소드 ID — useEditorState에서 LeftPanel → 본 컴포넌트로 prop 전달
 interface ScenarioGeneratePanelProps {
@@ -54,6 +58,12 @@ export default function ScenarioGeneratePanel({
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // 배경 목록 + 선택 (배경-E) — Member 단위, 등록은 배경 탭에서
+  const [backgrounds, setBackgrounds] = useState<BackgroundAssetSummary[]>([]);
+  const [selectedBgIds, setSelectedBgIds] = useState<Set<number>>(new Set());
+  const [backgroundsError, setBackgroundsError] = useState<string | null>(null);
+  const [isLoadingBackgrounds, setIsLoadingBackgrounds] = useState(true);
+
   useEffect(() => {
     if (!isValidProject) {
       setIsLoadingCharacters(false);
@@ -69,6 +79,18 @@ export default function ScenarioGeneratePanel({
       )
       .finally(() => setIsLoadingCharacters(false));
   }, [projectIdNum, isValidProject]);
+
+  // 배경 목록 — Member 단위 (project 무관)
+  useEffect(() => {
+    listBackgrounds()
+      .then((list) => setBackgrounds(list))
+      .catch((e) =>
+        setBackgroundsError(
+          e instanceof Error ? e.message : "배경 목록 조회 실패"
+        )
+      )
+      .finally(() => setIsLoadingBackgrounds(false));
+  }, []);
 
   const toggleCharacter = async (modelId: number) => {
     const newSelected = new Set(selectedIds);
@@ -87,6 +109,15 @@ export default function ScenarioGeneratePanel({
       }
     }
     setSelectedIds(newSelected);
+  };
+
+  const toggleBackground = (assetId: number) => {
+    setSelectedBgIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
   };
 
   const handleCreate = async () => {
@@ -145,9 +176,18 @@ export default function ScenarioGeneratePanel({
         loraModelPath: detail?.loraModelPath ?? null,
       };
     });
+    const bgMentions = [...selectedBgIds].map((id) => {
+      const bg = backgrounds.find((b) => b.assetId === id);
+      return {
+        name: bg?.assetName ?? "",
+        assetId: id,
+        assetUrl: bg?.assetUrl ?? null,
+      };
+    });
     start(episodeIdNum, {
       scenarioText: scenarioText.trim(),
       characters: mentions,
+      backgrounds: bgMentions,
     });
   };
 
@@ -273,6 +313,39 @@ export default function ScenarioGeneratePanel({
         )}
       </div>
 
+      {/* 배경 섹션 — 배경-E (#배경 멘션 매칭) */}
+      <div className="p-3 space-y-2 shrink-0 border-b border-[#2a2a2a]">
+        <p className="text-[9px] text-[#555] uppercase tracking-wider font-medium">
+          배경 (#배경 멘션 매칭)
+        </p>
+        {isLoadingBackgrounds ? (
+          <p className="text-[10px] text-[#555]">로딩 중...</p>
+        ) : backgroundsError ? (
+          <p className="text-[10px] text-red-400">{backgroundsError}</p>
+        ) : backgrounds.length === 0 ? (
+          <p className="text-[10px] text-[#555]">
+            등록된 배경이 없습니다. 좌측 배경 탭에서 등록하세요.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {backgrounds.map((b) => (
+              <label
+                key={b.assetId}
+                className="flex items-center gap-2 cursor-pointer text-[10px] text-[#ccc] hover:bg-[#1e1e1e] rounded px-1 py-0.5"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedBgIds.has(b.assetId)}
+                  onChange={() => toggleBackground(b.assetId)}
+                  className="accent-orange-500"
+                />
+                <span>#{b.assetName}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* 시나리오 입력 + 컨트롤 */}
       <div className="p-3 space-y-2 shrink-0 border-b border-[#2a2a2a]">
         <p className="text-[9px] text-[#555] uppercase tracking-wider font-medium">
@@ -281,7 +354,7 @@ export default function ScenarioGeneratePanel({
         <textarea
           value={scenarioText}
           onChange={(e) => setScenarioText(e.target.value)}
-          placeholder="50자 이상의 시나리오를 입력하세요. @캐릭터명으로 멘션하면 LoRA가 적용됩니다."
+          placeholder="50자 이상의 시나리오를 입력하세요. @캐릭터명/#배경명으로 멘션하면 LoRA/배경이 적용됩니다."
           rows={6}
           className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-2 text-xs text-white placeholder-[#444] focus:outline-none focus:border-orange-500 resize-none"
         />
