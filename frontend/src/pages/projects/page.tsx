@@ -155,7 +155,7 @@ export default function ProjectsPage() {
               return (
                 <div
                   key={project.id}
-                  onClick={() => navigate(`/?projectId=${project.id}`)}
+                  onClick={() => navigate(`/editor?projectId=${project.id}`)}
                   className="group bg-[#111] border border-[#222] rounded-2xl overflow-hidden hover:border-[#333] transition-all cursor-pointer"
                 >
                   {/* 썸네일 */}
