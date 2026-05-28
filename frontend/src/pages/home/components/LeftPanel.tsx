@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { mockBackgrounds, mockPresets } from "@/mocks/webtoon";
+import { mockPresets } from "@/mocks/webtoon";
 import { listLoras, createCharacterFromLora, type LoraCatalogItem, type CharacterModelDetail } from "@/lib/characterApi";
+import { listBackgrounds, type BackgroundAssetSummary } from "@/lib/backgroundApi";
 import type { DrawingTool } from "@/hooks/useEditorState";
 import BalloonPanel from "./BalloonPanel";
 import type { BalloonShape, BalloonItem } from "./BalloonPanel";
@@ -145,6 +146,19 @@ export default function LeftPanel({
   // 소재 탭에서 LoRA 카드 클릭 → 자동 등록 후 시나리오 탭에 전달
   const [pendingCharacter, setPendingCharacter] = useState<CharacterModelDetail | null>(null);
 
+  // 배경 자산 — 소재 탭 배경 카드 + 자동 선택용 (Member 단위 자기 자산)
+  const [backgrounds, setBackgrounds] = useState<BackgroundAssetSummary[]>([]);
+  useEffect(() => {
+    listBackgrounds()
+      .then((list) => setBackgrounds(list))
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error("[LeftPanel] 배경 목록 조회 실패:", e);
+      });
+  }, []);
+
+  const [pendingBackgroundAssetId, setPendingBackgroundAssetId] = useState<number | null>(null);
+
   const tabs: { key: TabType; icon: string; label: string }[] = [
     { key: "tool", icon: "ri-brush-line", label: "도구" },
     { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
@@ -162,9 +176,17 @@ export default function LeftPanel({
     description: l.description ?? "",
   }));
 
+  const backgroundCards = backgrounds.map((bg) => ({
+    id: `bg-${bg.assetId}`,
+    name: bg.assetName,
+    tags: [] as string[],
+    thumbnail: toAbsoluteImageUrl(bg.assetUrl),
+    description: "",
+  }));
+
   const filteredItems = [
     ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? loraCards : []),
-    ...(libraryFilter === "전체" || libraryFilter === "배경" ? mockBackgrounds : []),
+    ...(libraryFilter === "전체" || libraryFilter === "배경" ? backgroundCards : []),
   ].filter(
     (item) =>
       !librarySearch ||
@@ -327,8 +349,16 @@ export default function LeftPanel({
                 <button
                   key={item.id}
                   onClick={async () => {
+                    // 배경 카드 — 자기 자산, 등록 없이 selectedBgIds에 add
+                    const bg = backgrounds.find((b) => `bg-${b.assetId}` === item.id);
+                    if (bg) {
+                      setActiveTab("scenario");
+                      setPendingBackgroundAssetId(bg.assetId);
+                      return;
+                    }
+                    // LoRA 카드 — 자동 등록 후 시나리오 탭에 push
                     const lora = loras.find((l) => `lora-${l.id}` === item.id);
-                    if (!lora) return;  // 배경 등 LoRA 아닌 카드는 클릭 무시
+                    if (!lora) return;
                     if (!activeProjectId) {
                       // eslint-disable-next-line no-console
                       console.warn("[LeftPanel] activeProjectId 없음 — LoRA 자동 등록 skip");
@@ -391,6 +421,8 @@ export default function LeftPanel({
           episodeId={activeEpisodeId}
           pendingCharacter={pendingCharacter}
           onConsumePendingCharacter={() => setPendingCharacter(null)}
+          pendingBackgroundAssetId={pendingBackgroundAssetId}
+          onConsumePendingBackground={() => setPendingBackgroundAssetId(null)}
         />
       )}
 

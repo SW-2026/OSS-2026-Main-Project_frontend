@@ -20,6 +20,8 @@ interface ScenarioGeneratePanelProps {
   episodeId: string;          // useEditorState.activeEpisodeId (string, 가짜는 "ep-..." prefix)
   pendingCharacter: CharacterModelDetail | null;
   onConsumePendingCharacter: () => void;
+  pendingBackgroundAssetId: number | null;
+  onConsumePendingBackground: () => void;
 }
 
 const MIN_SCENARIO_LENGTH = 50;
@@ -37,6 +39,8 @@ export default function ScenarioGeneratePanel({
   episodeId,
   pendingCharacter,
   onConsumePendingCharacter,
+  pendingBackgroundAssetId,
+  onConsumePendingBackground,
 }: ScenarioGeneratePanelProps) {
   // backend ID 변환 (string → number). 가짜(`ep-...`/`cut-...`)나 null이면 NaN
   const projectIdNum = projectId != null ? Number(projectId) : NaN;
@@ -118,6 +122,14 @@ export default function ScenarioGeneratePanel({
         console.error("[ScenarioGeneratePanel] LoRA 목록 조회 실패:", e);
       });
   }, []);
+
+  // 소재 탭에서 배경 카드 클릭 → selectedBgIds에 자동 추가
+  useEffect(() => {
+    if (pendingBackgroundAssetId != null) {
+      setSelectedBgIds((prev) => new Set(prev).add(pendingBackgroundAssetId));
+      onConsumePendingBackground();
+    }
+  }, [pendingBackgroundAssetId, onConsumePendingBackground]);
 
   // 소재 탭에서 LoRA 카드 클릭으로 자동 등록된 캐릭터 받아들임 → 목록 + 캐시 + 자동선택
   useEffect(() => {
