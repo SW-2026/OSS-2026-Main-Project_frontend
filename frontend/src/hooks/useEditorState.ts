@@ -6,10 +6,18 @@ import {
   updateEpisode,
   deleteEpisode as apiDeleteEpisode,
 } from "@/lib/episodeApi";
-import { listPanels, createPanel } from "@/lib/panelApi";
+import { listPanels, createPanel, saveCutEditorData, getCutEditorData } from "@/lib/panelApi";
 import api from "@/lib/api";
 import type { BalloonItem, BalloonShape } from "@/pages/home/components/BalloonPanel";
 import type { AIGeneratedImage } from "@/pages/home/components/AIImagePanel";
+
+const BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  "http://localhost:8080";
+
+// backend가 finalImageUrl 등을 "/images/..." 상대경로로 저장 → 절대 URL로 변환해서 frontend에 노출
+const toAbsoluteImageUrl = (path: string | null | undefined): string =>
+  !path ? "" : path.startsWith("http") ? path : `${BASE_URL}${path}`;
 
 export type LayerType = "background" | "character" | "effect" | "dialogue" | "sketch" | "lineart" | "color";
 
@@ -268,7 +276,7 @@ export function useEditorState(initialProjectId?: string | null) {
               index: panel.panelOrder,
               label: `컷 ${panel.panelOrder}`,
               prompt: panel.prompt ?? "",
-              thumbnail: panel.finalImageUrl ?? "",
+              thumbnail: toAbsoluteImageUrl(panel.finalImageUrl),
               isActive: false,
               isGenerated: panel.status === "COMPLETED",
               episodeId,
@@ -342,36 +350,26 @@ export function useEditorState(initialProjectId?: string | null) {
     loadProject();
   }, [initialProjectId]);
 
-  // 컷 데이터 로드 — history 도메인 API 우선, fallback: Supabase → localStorage
+  // 컷 데이터 로드 — cutEditorData API → localStorage fallback (B0 cutover)
   const loadCutData = async (cutId: string) => {
     if (!cutId) return;
     try {
       let data: any = null;
 
-      if (isValidUUID(cutId)) {
-        // UUID 형식: Supabase 먼저 시도
-        const { data: dbData, error } = await supabase
-          .from("cut_data")
-          .select("*")
-          .eq("cut_id", cutId)
-          .maybeSingle();
-
-        if (error) throw error;
-        if (dbData) {
-          data = dbData;
-        } else {
-          // Supabase에 없으면 history API → localStorage
-          data = await loadCutDataFromBackend(cutId);
-          if (!data) {
-            data = loadCutDataFromLocal(cutId);
+      const panelId = Number(cutId);
+      if (!Number.isNaN(panelId)) {
+        try {
+          const json = await getCutEditorData(panelId);
+          if (json) {
+            data = JSON.parse(json);
           }
+        } catch (apiErr) {
+          // eslint-disable-next-line no-console
+          console.error("[loadCutData] cutEditorData API 로드 실패 → localStorage fallback:", apiErr);
         }
-      } else {
-        // UUID 아닌 cut: history API 먼저 → localStorage fallback
-        data = await loadCutDataFromBackend(cutId);
-        if (!data) {
-          data = loadCutDataFromLocal(cutId);
-        }
+      }
+      if (!data) {
+        data = loadCutDataFromLocal(cutId);
       }
 
       if (!data) return;
@@ -641,7 +639,7 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("unsaved");
   }, []);
 
-  // 저장: 현재 컷 데이터를 history 도메인 API로 저장 (fallback: Supabase / localStorage)
+  // 저장: cutEditorData API로 저장 (B0 cutover). 데모 cut(`cut-...`) 또는 API fail 시 localStorage fallback
   const handleSave = useCallback(async () => {
     if (!activeCutId) {
       setSaveStatus("saved");
@@ -659,30 +657,18 @@ export function useEditorState(initialProjectId?: string | null) {
         layers,
       };
 
-      let saved = false;
-
-      if (isValidUUID(activeCutId)) {
-        // UUID 형식: Supabase 먼저 → history API → localStorage
+      const panelId = Number(activeCutId);
+      if (!Number.isNaN(panelId)) {
         try {
-          await supabase.from("cut_data").upsert(payload, { onConflict: "cut_id" });
-          saved = true;
-        } catch (supabaseErr) {
+          await saveCutEditorData(panelId, JSON.stringify(payload));
+        } catch (apiErr) {
           // eslint-disable-next-line no-console
-          console.error("[handleSave] Supabase 저장 실패:", supabaseErr);
-        }
-
-        if (!saved) {
-          saved = await saveCutDataToBackend(activeCutId, payload);
-        }
-        if (!saved) {
+          console.error("[handleSave] cutEditorData API 저장 실패 → localStorage fallback:", apiErr);
           saveCutDataToLocal(activeCutId, payload);
         }
       } else {
-        // UUID 아닌 cut: history API 먼저 → localStorage
-        saved = await saveCutDataToBackend(activeCutId, payload);
-        if (!saved) {
-          saveCutDataToLocal(activeCutId, payload);
-        }
+        // 데모 cut(`cut-...`) — backend에 없는 cutId → localStorage
+        saveCutDataToLocal(activeCutId, payload);
       }
 
       setSaveStatus("saved");
