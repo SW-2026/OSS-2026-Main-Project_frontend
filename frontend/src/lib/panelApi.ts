@@ -23,6 +23,8 @@ export interface PanelDetail {
   finalImageUrl: string | null;
   layoutData: string | null;
   prompt: string | null;
+  characterAssetUrl: string | null;
+  backgroundAssetUrl: string | null;
 }
 
 export interface CharacterMention {
