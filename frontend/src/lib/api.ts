@@ -37,3 +37,6 @@ export const tokenStorage = {
   set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
   clear: () => localStorage.removeItem(TOKEN_KEY),
 };
+
+// main의 default-import 호출처(panelApi/episodeApi/projectApi/characterApi/backgroundApi/useEditorState/usePanelGeneration)와의 호환
+export default api;
