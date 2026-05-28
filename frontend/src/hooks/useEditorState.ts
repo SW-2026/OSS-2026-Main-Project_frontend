@@ -280,6 +280,8 @@ export function useEditorState(initialProjectId?: string | null) {
               isActive: false,
               isGenerated: panel.status === "COMPLETED",
               episodeId,
+              characterAssetUrl: toAbsoluteImageUrl(panel.characterAssetUrl) || undefined,
+              backgroundAssetUrl: toAbsoluteImageUrl(panel.backgroundAssetUrl) || undefined,
             });
           });
         }
@@ -372,7 +374,33 @@ export function useEditorState(initialProjectId?: string | null) {
         data = loadCutDataFromLocal(cutId);
       }
 
-      if (!data) return;
+      if (!data) {
+        // cut-data 없음 → defaultLayers 리셋 + cut의 character/background Asset URL을 Layer.imageUrl로 매핑
+        // (canvasImages 경로 아님 — Layer 경로 정책)
+        const cut = cutsRef.current.find((c) => c.id === cutId);
+        if (cut) {
+          const baseLayers: Layer[] = defaultLayers.map((l) =>
+            l.type === "background" && cut.backgroundAssetUrl
+              ? { ...l, imageUrl: cut.backgroundAssetUrl }
+              : { ...l }
+          );
+          // defaultLayers엔 character 없음 — Asset URL 있을 때만 신규 push
+          if (cut.characterAssetUrl) {
+            baseLayers.push({
+              id: `layer-character-${cut.id}`,
+              name: "캐릭터",
+              type: "character",
+              visible: true,
+              locked: false,
+              opacity: 100,
+              blendMode: "normal",
+              imageUrl: cut.characterAssetUrl,
+            });
+          }
+          setLayers(baseLayers);
+        }
+        return;
+      }
 
       if (data.strokes) {
         const parsedStrokes = Array.isArray(data.strokes) ? data.strokes : [];
