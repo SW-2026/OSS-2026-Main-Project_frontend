@@ -1,14 +1,18 @@
 import axios from "axios";
-import { supabase } from "./supabase";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8080",
-  headers: { "Content-Type": "application/json" },
+const BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  "http://localhost:8080";
+
+const TOKEN_KEY = "accessToken";
+
+export const api = axios.create({
+  baseURL: BASE_URL,
+  withCredentials: true,
 });
 
-api.interceptors.request.use(async (config) => {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -16,14 +20,23 @@ api.interceptors.request.use(async (config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      await supabase.auth.signOut();
-      window.location.href = "/login";
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
     }
-    return Promise.reject(error);
+    return Promise.reject(err);
   }
 );
 
+export const tokenStorage = {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+// main의 default-import 호출처(panelApi/episodeApi/projectApi/characterApi/backgroundApi/useEditorState/usePanelGeneration)와의 호환
 export default api;

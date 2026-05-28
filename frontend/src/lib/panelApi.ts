@@ -60,3 +60,22 @@ export async function createPanel(episodeId: number): Promise<number> {
   );
   return res.data.data;
 }
+
+// === Cut editor data — B0 cutover (supabase + PanelHistory 대체) ===
+
+interface CutEditorDataResponse {
+  cutEditorData: string | null;
+}
+
+// PATCH /api/panels/{panelId}/cut-data — strokes/balloons/canvasImages/layers JSON 문자열 저장
+export async function saveCutEditorData(panelId: number, cutEditorData: string): Promise<void> {
+  await api.patch(`/api/panels/${panelId}/cut-data`, { cutEditorData });
+}
+
+// GET /api/panels/{panelId}/cut-data — 저장 안 된 panel은 cutEditorData=null
+export async function getCutEditorData(panelId: number): Promise<string | null> {
+  const res = await api.get<ApiResponseEnvelope<CutEditorDataResponse>>(
+    `/api/panels/${panelId}/cut-data`
+  );
+  return res.data.data.cutEditorData;
+}

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import api from "@/lib/api";
+import { listPanels } from "@/lib/panelApi";
 
 export interface GeneratedPanel {
   panelId: number;
@@ -75,19 +76,26 @@ export function usePanelGeneration() {
 
         pollRef.current = setInterval(async () => {
           try {
-            const pollRes = await api.get(
-              `/api/episodes/${episodeId}/panels/generate/status?taskId=${taskId}`
-            );
+            const pollRes = await api.get(`/api/ai/tasks/${taskId}`);
             const pollData = pollRes.data?.data ?? pollRes.data;
 
-            if (pollData?.status === "COMPLETED" || pollData?.panels) {
+            if (pollData?.status === "COMPLETED") {
               stopPolling();
-              setState({
-                status: "completed",
-                progress: 100,
-                panels: pollData.panels ?? [],
-                error: "",
-              });
+              try {
+                const detailList = await listPanels(episodeId);
+                const panels: GeneratedPanel[] = detailList.map((p) => ({
+                  panelId: p.panelId,
+                  panelOrder: p.panelOrder,
+                  imageUrl: p.finalImageUrl ?? "",
+                  prompt: p.prompt ?? "",
+                  status: p.status,
+                }));
+                setState({ status: "completed", progress: 100, panels, error: "" });
+              } catch (listErr) {
+                // eslint-disable-next-line no-console
+                console.error("[usePanelGeneration] COMPLETED 후 listPanels 실패:", listErr);
+                setState({ status: "completed", progress: 100, panels: [], error: "" });
+              }
               return;
             }
 
@@ -96,13 +104,13 @@ export function usePanelGeneration() {
               setState((prev) => ({
                 ...prev,
                 status: "error",
-                error: pollData?.error ?? "패널 생성에 실패했습니다.",
+                error: pollData?.errorMessage ?? pollData?.error ?? "패널 생성에 실패했습니다.",
               }));
               return;
             }
 
             // 진행 중 — progress 업데이트
-            const pct = pollData?.progress ?? 0;
+            const pct = pollData?.progressPercent ?? pollData?.progress ?? 0;
             setState((prev) => ({
               ...prev,
               progress: Math.max(prev.progress, Math.min(pct, 99)),
@@ -125,11 +133,30 @@ export function usePanelGeneration() {
     [stopPolling]
   );
 
+  // mount 시 또는 episode 전환 시 외부에서 panels seed 가능 (새로고침 후 복원용)
+  const seed = useCallback(async (episodeId: number) => {
+    try {
+      const detailList = await listPanels(episodeId);
+      const panels: GeneratedPanel[] = detailList.map((p) => ({
+        panelId: p.panelId,
+        panelOrder: p.panelOrder,
+        imageUrl: p.finalImageUrl ?? "",
+        prompt: p.prompt ?? "",
+        status: p.status,
+      }));
+      setState((prev) => ({ ...prev, panels }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[usePanelGeneration] seed 실패:", err);
+    }
+  }, []);
+
   return {
     status: state.status,
     progress: state.progress,
     panels: state.panels,
     error: state.error,
     start,
+    seed,
   };
 }

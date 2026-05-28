@@ -39,7 +39,7 @@ export default function ScenarioGeneratePanel({
   const isValidEpisode = !Number.isNaN(episodeIdNum);
 
   const [scenarioText, setScenarioText] = useState("");
-  const { status, progress, panels, error, start } = usePanelGeneration();
+  const { status, progress, panels, error, start, seed } = usePanelGeneration();
 
   // 캐릭터 목록 + 선택 + detail 캐시
   const [characters, setCharacters] = useState<CharacterModelSummary[]>([]);
@@ -92,6 +92,13 @@ export default function ScenarioGeneratePanel({
       )
       .finally(() => setIsLoadingBackgrounds(false));
   }, []);
+
+  // 새로고침 후 결과 패널 복원 — backend listPanels로 panels seed
+  useEffect(() => {
+    if (isValidEpisode) {
+      seed(episodeIdNum);
+    }
+  }, [episodeIdNum, isValidEpisode, seed]);
 
   const toggleCharacter = async (modelId: number) => {
     const newSelected = new Set(selectedIds);
