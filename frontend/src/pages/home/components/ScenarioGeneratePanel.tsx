@@ -4,8 +4,10 @@ import {
   listCharacters,
   getCharacter,
   createCharacter,
+  listLoras,
   type CharacterModelSummary,
   type CharacterModelDetail,
+  type LoraCatalogItem,
 } from "@/lib/characterApi";
 import {
   listBackgrounds,
@@ -16,6 +18,8 @@ import {
 interface ScenarioGeneratePanelProps {
   projectId: string | null;   // useEditorState.activeProjectId (URL에서 옴, string)
   episodeId: string;          // useEditorState.activeEpisodeId (string, 가짜는 "ep-..." prefix)
+  pendingCharacter: CharacterModelDetail | null;
+  onConsumePendingCharacter: () => void;
 }
 
 const MIN_SCENARIO_LENGTH = 50;
@@ -31,6 +35,8 @@ function resolveImageUrl(path: string): string {
 export default function ScenarioGeneratePanel({
   projectId,
   episodeId,
+  pendingCharacter,
+  onConsumePendingCharacter,
 }: ScenarioGeneratePanelProps) {
   // backend ID 변환 (string → number). 가짜(`ep-...`/`cut-...`)나 null이면 NaN
   const projectIdNum = projectId != null ? Number(projectId) : NaN;
@@ -49,6 +55,9 @@ export default function ScenarioGeneratePanel({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [charactersError, setCharactersError] = useState<string | null>(null);
   const [isLoadingCharacters, setIsLoadingCharacters] = useState(true);
+
+  // LoRA 카탈로그 — 등록 폼 select용 (마운트 시 1회)
+  const [loras, setLoras] = useState<LoraCatalogItem[]>([]);
 
   // 등록 폼 state
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -99,6 +108,34 @@ export default function ScenarioGeneratePanel({
       seed(episodeIdNum);
     }
   }, [episodeIdNum, isValidEpisode, seed]);
+
+  // LoRA 카탈로그 — 등록 폼 select용 (마운트 시 1회)
+  useEffect(() => {
+    listLoras()
+      .then((list) => setLoras(list))
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error("[ScenarioGeneratePanel] LoRA 목록 조회 실패:", e);
+      });
+  }, []);
+
+  // 소재 탭에서 LoRA 카드 클릭으로 자동 등록된 캐릭터 받아들임 → 목록 + 캐시 + 자동선택
+  useEffect(() => {
+    if (pendingCharacter) {
+      const summary: CharacterModelSummary = {
+        modelId: pendingCharacter.modelId,
+        modelName: pendingCharacter.modelName,
+        status: pendingCharacter.status,
+        createdAt: pendingCharacter.createdAt,
+      };
+      setCharacters((prev) =>
+        prev.some((c) => c.modelId === summary.modelId) ? prev : [...prev, summary]
+      );
+      setCharacterDetailCache((prev) => ({ ...prev, [pendingCharacter.modelId]: pendingCharacter }));
+      setSelectedIds((prev) => new Set(prev).add(pendingCharacter.modelId));
+      onConsumePendingCharacter();
+    }
+  }, [pendingCharacter, onConsumePendingCharacter]);
 
   const toggleCharacter = async (modelId: number) => {
     const newSelected = new Set(selectedIds);
@@ -324,12 +361,24 @@ export default function ScenarioGeneratePanel({
               placeholder="트리거 워드 (선택)"
               className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-xs text-white placeholder-[#555] focus:outline-none focus:border-orange-500"
             />
-            <input
+            <select
               value={newLoraPath}
-              onChange={(e) => setNewLoraPath(e.target.value)}
-              placeholder="LoRA 모델 경로 (선택)"
-              className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-xs text-white placeholder-[#555] focus:outline-none focus:border-orange-500"
-            />
+              onChange={(e) => {
+                const fileName = e.target.value;
+                setNewLoraPath(fileName);
+                // 선택된 LoRA의 triggerWord 자동 채움 (덮어씀)
+                const selected = loras.find((l) => l.fileName === fileName);
+                if (selected?.triggerWord) {
+                  setNewTrigger(selected.triggerWord);
+                }
+              }}
+              className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500"
+            >
+              <option value="">LoRA 선택 (선택사항)</option>
+              {loras.map((l) => (
+                <option key={l.id} value={l.fileName}>{l.displayName}</option>
+              ))}
+            </select>
             <div className="flex items-center gap-2">
               <label className="flex-1 flex items-center gap-1.5 bg-[#111] border border-dashed border-[#333] rounded px-2 py-1.5 text-xs text-[#666] hover:border-orange-500/50 cursor-pointer transition-colors">
                 <i className="ri-image-add-line text-sm" />

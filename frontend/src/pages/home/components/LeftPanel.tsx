@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { mockCharacters, mockBackgrounds, mockPresets } from "@/mocks/webtoon";
+import { mockBackgrounds, mockPresets } from "@/mocks/webtoon";
+import { listLoras, createCharacterFromLora, type LoraCatalogItem, type CharacterModelDetail } from "@/lib/characterApi";
 import type { DrawingTool } from "@/hooks/useEditorState";
 import BalloonPanel from "./BalloonPanel";
 import type { BalloonShape, BalloonItem } from "./BalloonPanel";
@@ -51,6 +52,13 @@ interface LeftPanelProps {
   activeProjectId: string | null;
   activeEpisodeId: string;
 }
+
+const BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  "http://localhost:8080";
+
+const toAbsoluteImageUrl = (path: string | null | undefined): string =>
+  !path ? "" : path.startsWith("http") ? path : `${BASE_URL}${path}`;
 
 const BRUSH_PRESETS: { name: string; icon: string; size: number; opacity: number; tool: DrawingTool }[] = [
   { name: "G펜", icon: "ri-pen-nib-line", size: 3, opacity: 100, tool: "pen" },
@@ -123,6 +131,20 @@ export default function LeftPanel({
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [presetCategory, setPresetCategory] = useState<"emotions" | "actions" | "angles" | "styles">("emotions");
 
+  // LoRA 카탈로그 — 소재 탭 캐릭터 카드용
+  const [loras, setLoras] = useState<LoraCatalogItem[]>([]);
+  useEffect(() => {
+    listLoras()
+      .then((list) => setLoras(list))
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error("[LeftPanel] LoRA 목록 조회 실패:", e);
+      });
+  }, []);
+
+  // 소재 탭에서 LoRA 카드 클릭 → 자동 등록 후 시나리오 탭에 전달
+  const [pendingCharacter, setPendingCharacter] = useState<CharacterModelDetail | null>(null);
+
   const tabs: { key: TabType; icon: string; label: string }[] = [
     { key: "tool", icon: "ri-brush-line", label: "도구" },
     { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
@@ -132,8 +154,16 @@ export default function LeftPanel({
     { key: "background", icon: "ri-landscape-line", label: "배경" },
   ];
 
+  const loraCards = loras.map((l) => ({
+    id: `lora-${l.id}`,
+    name: l.displayName,
+    tags: [] as string[],
+    thumbnail: toAbsoluteImageUrl(l.thumbnailUrl),
+    description: l.description ?? "",
+  }));
+
   const filteredItems = [
-    ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? mockCharacters : []),
+    ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? loraCards : []),
     ...(libraryFilter === "전체" || libraryFilter === "배경" ? mockBackgrounds : []),
   ].filter(
     (item) =>
@@ -294,7 +324,29 @@ export default function LeftPanel({
           <div className="flex-1 overflow-y-auto px-3 pb-3">
             <div className="grid grid-cols-2 gap-2">
               {filteredItems.map((item) => (
-                <button key={item.id} className="group relative rounded-lg overflow-hidden border border-[#2a2a2a] hover:border-orange-500/50 transition-colors cursor-pointer bg-[#1e1e1e]">
+                <button
+                  key={item.id}
+                  onClick={async () => {
+                    const lora = loras.find((l) => `lora-${l.id}` === item.id);
+                    if (!lora) return;  // 배경 등 LoRA 아닌 카드는 클릭 무시
+                    if (!activeProjectId) {
+                      // eslint-disable-next-line no-console
+                      console.warn("[LeftPanel] activeProjectId 없음 — LoRA 자동 등록 skip");
+                      return;
+                    }
+                    const projectIdNum = Number(activeProjectId);
+                    if (Number.isNaN(projectIdNum)) return;
+                    try {
+                      const created = await createCharacterFromLora(projectIdNum, lora.fileName);
+                      setActiveTab("scenario");
+                      setPendingCharacter(created);
+                    } catch (e) {
+                      // eslint-disable-next-line no-console
+                      console.error("[LeftPanel] LoRA 자동 등록 실패:", e);
+                    }
+                  }}
+                  className="group relative rounded-lg overflow-hidden border border-[#2a2a2a] hover:border-orange-500/50 transition-colors cursor-pointer bg-[#1e1e1e]"
+                >
                   <div className="w-full aspect-[3/4] overflow-hidden bg-[#1a1a1a]">
                     <img src={item.thumbnail} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   </div>
@@ -303,9 +355,6 @@ export default function LeftPanel({
                     <div className="flex flex-wrap gap-0.5 mt-0.5">
                       {item.tags.slice(0, 2).map((tag) => (<span key={tag} className="text-[8px] text-[#666] bg-[#222] px-1 py-0.5 rounded">{tag}</span>))}
                     </div>
-                  </div>
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-white text-[10px] bg-orange-500 px-2 py-1 rounded">캔버스에 추가</span>
                   </div>
                 </button>
               ))}
@@ -340,6 +389,8 @@ export default function LeftPanel({
         <ScenarioGeneratePanel
           projectId={activeProjectId}
           episodeId={activeEpisodeId}
+          pendingCharacter={pendingCharacter}
+          onConsumePendingCharacter={() => setPendingCharacter(null)}
         />
       )}
 

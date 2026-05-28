@@ -79,3 +79,32 @@ export async function createCharacter(
   );
   return res.data.data;
 }
+
+// === LoRA catalog — 시연 PC LoRA 카탈로그 (소재 탭 + 캐릭터 등록 select용) ===
+
+export interface LoraCatalogItem {
+  id: number;
+  fileName: string;
+  displayName: string;
+  thumbnailUrl: string | null;
+  triggerWord: string | null;
+  description: string | null;
+}
+
+export async function listLoras(): Promise<LoraCatalogItem[]> {
+  const res = await api.get<ApiResponseEnvelope<LoraCatalogItem[]>>("/api/loras");
+  return res.data.data;
+}
+
+// POST /api/projects/{id}/models/from-lora?loraFileName=... — LoRA 카탈로그 기반 자동 등록 (멱등)
+export async function createCharacterFromLora(
+  projectId: number,
+  loraFileName: string
+): Promise<CharacterModelDetail> {
+  const res = await api.post<ApiResponseEnvelope<CharacterModelDetail>>(
+    `/api/projects/${projectId}/models/from-lora`,
+    null,
+    { params: { loraFileName } }
+  );
+  return res.data.data;
+}
