@@ -18,10 +18,10 @@ import {
 interface ScenarioGeneratePanelProps {
   projectId: string | null;   // useEditorState.activeProjectId (URL에서 옴, string)
   episodeId: string;          // useEditorState.activeEpisodeId (string, 가짜는 "ep-..." prefix)
-  pendingCharacter: CharacterModelDetail | null;
-  onConsumePendingCharacter: () => void;
-  pendingBackgroundAssetId: number | null;
-  onConsumePendingBackground: () => void;
+  pendingCharacter: CharacterModelDetail | null;   // 소재 탭에서 LoRA 클릭 → 자동 등록된 캐릭터
+  onConsumePendingCharacter: () => void;            // pendingCharacter 소비 후 초기화 콜백
+  pendingBackgroundAssetId: number | null;          // 소재 탭에서 배경 카드 클릭 → 자동 선택
+  onConsumePendingBackground: () => void;           // pendingBackgroundAssetId 소비 후 초기화 콜백
 }
 
 const MIN_SCENARIO_LENGTH = 50;
@@ -78,41 +78,6 @@ export default function ScenarioGeneratePanel({
   const [backgroundsError, setBackgroundsError] = useState<string | null>(null);
   const [isLoadingBackgrounds, setIsLoadingBackgrounds] = useState(true);
 
-  useEffect(() => {
-    if (!isValidProject) {
-      setIsLoadingCharacters(false);
-      return;
-    }
-    setIsLoadingCharacters(true);
-    listCharacters(projectIdNum)
-      .then((list) => setCharacters(list))
-      .catch((e) =>
-        setCharactersError(
-          e instanceof Error ? e.message : "캐릭터 목록 조회 실패"
-        )
-      )
-      .finally(() => setIsLoadingCharacters(false));
-  }, [projectIdNum, isValidProject]);
-
-  // 배경 목록 — Member 단위 (project 무관)
-  useEffect(() => {
-    listBackgrounds()
-      .then((list) => setBackgrounds(list))
-      .catch((e) =>
-        setBackgroundsError(
-          e instanceof Error ? e.message : "배경 목록 조회 실패"
-        )
-      )
-      .finally(() => setIsLoadingBackgrounds(false));
-  }, []);
-
-  // 새로고침 후 결과 패널 복원 — backend listPanels로 panels seed
-  useEffect(() => {
-    if (isValidEpisode) {
-      seed(episodeIdNum);
-    }
-  }, [episodeIdNum, isValidEpisode, seed]);
-
   // LoRA 카탈로그 — 등록 폼 select용 (마운트 시 1회)
   useEffect(() => {
     listLoras()
@@ -148,6 +113,41 @@ export default function ScenarioGeneratePanel({
       onConsumePendingCharacter();
     }
   }, [pendingCharacter, onConsumePendingCharacter]);
+
+  useEffect(() => {
+    if (!isValidProject) {
+      setIsLoadingCharacters(false);
+      return;
+    }
+    setIsLoadingCharacters(true);
+    listCharacters(projectIdNum)
+      .then((list) => setCharacters(list))
+      .catch((e) =>
+        setCharactersError(
+          e instanceof Error ? e.message : "캐릭터 목록 조회 실패"
+        )
+      )
+      .finally(() => setIsLoadingCharacters(false));
+  }, [projectIdNum, isValidProject]);
+
+  // 배경 목록 — Member 단위 (project 무관)
+  useEffect(() => {
+    listBackgrounds()
+      .then((list) => setBackgrounds(list))
+      .catch((e) =>
+        setBackgroundsError(
+          e instanceof Error ? e.message : "배경 목록 조회 실패"
+        )
+      )
+      .finally(() => setIsLoadingBackgrounds(false));
+  }, []);
+
+  // 새로고침 후 결과 패널 복원 — backend listPanels로 panels seed
+  useEffect(() => {
+    if (isValidEpisode) {
+      seed(episodeIdNum);
+    }
+  }, [episodeIdNum, isValidEpisode, seed]);
 
   const toggleCharacter = async (modelId: number) => {
     const newSelected = new Set(selectedIds);

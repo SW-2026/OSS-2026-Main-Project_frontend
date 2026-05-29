@@ -43,6 +43,48 @@ export const mockCharacters = [
     thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20male%20high%20school%20student%20character%20with%20messy%20brown%20hair%2C%20casual%20school%20uniform%2C%20shy%20timid%20expression%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20gentle%20personality%2C%20full%20body%20portrait&width=200&height=280&seq=char6&orientation=portrait",
     description: "소심한 친구 · 17세",
   },
+  {
+    id: "char-7",
+    name: "윤아름",
+    tags: ["조연", "여성", "학생"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20female%20high%20school%20student%20with%20short%20bob%20cut%20pink%20hair%2C%20trendy%20accessories%2C%20bright%20energetic%20smile%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20idol-like%20appearance%2C%20full%20body%20portrait&width=200&height=280&seq=char7&orientation=portrait",
+    description: "반 친구 · 17세",
+  },
+  {
+    id: "char-8",
+    name: "정태호",
+    tags: ["조연", "남성", "학생"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20male%20high%20school%20student%20with%20athletic%20build%2C%20short%20spiky%20black%20hair%2C%20sports%20uniform%2C%20confident%20grin%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20sports%20ace%20character%2C%20full%20body%20portrait&width=200&height=280&seq=char8&orientation=portrait",
+    description: "체육부장 · 18세",
+  },
+  {
+    id: "char-9",
+    name: "송미나",
+    tags: ["조연", "여성", "선생님"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20young%20female%20teacher%20character%20with%20glasses%20and%20long%20brown%20hair%20tied%20in%20ponytail%2C%20formal%20blouse%20and%20skirt%2C%20warm%20gentle%20smile%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20caring%20mentor%20look%2C%20full%20body%20portrait&width=200&height=280&seq=char9&orientation=portrait",
+    description: "미술 선생님 · 28세",
+  },
+  {
+    id: "char-10",
+    name: "김비서",
+    tags: ["조연", "남성", "직장인"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20adult%20male%20secretary%20character%20in%20black%20business%20suit%2C%20slicked%20back%20hair%2C%20professional%20neutral%20expression%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20corporate%20worker%20look%2C%20full%20body%20portrait&width=200&height=280&seq=char10&orientation=portrait",
+    description: "이도현의 비서 · 35세",
+  },
+  {
+    id: "char-11",
+    name: "할머니",
+    tags: ["조연", "여성", "어르신"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20elderly%20grandmother%20character%20with%20silver%20hair%20in%20neat%20bun%2C%20traditional%20Korean%20hanbok%2C%20warm%20wrinkled%20smile%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20kind%20grandmotherly%20look%2C%20full%20body%20portrait&width=200&height=280&seq=char11&orientation=portrait",
+    description: "한지유의 할머니 · 72세",
+  },
+  {
+    id: "char-12",
+    name: "어린 지유",
+    tags: ["회상", "여성", "어린이"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20style%20cute%20young%20elementary%20school%20girl%20character%20with%20twin%20tails%20black%20hair%2C%20school%20backpack%2C%20innocent%20big%20eyes%2C%20clean%20white%20background%2C%20anime%20illustration%20style%2C%20childhood%20flashback%20character%2C%20full%20body%20portrait&width=200&height=280&seq=char12&orientation=portrait",
+    description: "회상 씬 · 9세",
+  },
 ];
 
 export const mockBackgrounds = [
@@ -81,6 +123,30 @@ export const mockBackgrounds = [
     name: "벚꽃 길",
     tags: ["실외", "공원", "봄"],
     thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20background%20cherry%20blossom%20path%20walkway%2C%20pink%20sakura%20petals%20falling%2C%20stone%20path%20between%20blooming%20trees%2C%20anime%20manga%20art%20style%20background%20illustration%2C%20spring%20atmosphere%2C%20soft%20pastel%20colors&width=280&height=160&seq=bg6&orientation=landscape",
+  },
+  {
+    id: "bg-7",
+    name: "도서관",
+    tags: ["실내", "학교", "낮"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20background%20large%20library%20interior%20with%20tall%20wooden%20bookshelves%2C%20reading%20tables%2C%20warm%20lamp%20lighting%2C%20dust%20particles%20in%20sunbeams%20through%20windows%2C%20anime%20manga%20art%20style%20background%20illustration%2C%20quiet%20scholarly%20atmosphere&width=280&height=160&seq=bg7&orientation=landscape",
+  },
+  {
+    id: "bg-8",
+    name: "공원 벤치",
+    tags: ["실외", "공원", "낮"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20background%20peaceful%20park%20with%20wooden%20bench%20under%20large%20tree%2C%20green%20grass%20lawn%2C%20dappled%20sunlight%20filtering%20through%20leaves%2C%20anime%20manga%20art%20style%20background%20illustration%2C%20serene%20nature%20scene%2C%20soft%20warm%20colors&width=280&height=160&seq=bg8&orientation=landscape",
+  },
+  {
+    id: "bg-9",
+    name: "편의점 앞",
+    tags: ["실외", "도시", "밤"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20background%20convenience%20store%20exterior%20at%20night%2C%20bright%20fluorescent%20sign%2C%20parked%20bicycles%2C%20empty%20street%2C%20anime%20manga%20art%20style%20background%20illustration%2C%20urban%20night%20atmosphere%2C%20nostalgic%20mood&width=280&height=160&seq=bg9&orientation=landscape",
+  },
+  {
+    id: "bg-10",
+    name: "한강 공원",
+    tags: ["실외", "공원", "저녁"],
+    thumbnail: "https://readdy.ai/api/search-image?query=Korean%20webtoon%20background%20Han%20River%20park%20at%20sunset%2C%20bridge%20in%20distance%20with%20city%20skyline%2C%20riverside%20walking%20path%2C%20orange%20purple%20sky%20reflection%20on%20water%2C%20anime%20manga%20art%20style%20background%20illustration%2C%20romantic%20evening%20atmosphere&width=280&height=160&seq=bg10&orientation=landscape",
   },
 ];
 

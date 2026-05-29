@@ -11,11 +11,13 @@ import ColorPanel from "./components/ColorPanel";
 import LayersPanel from "./components/LayersPanel";
 import BottomTimeline from "./components/BottomTimeline";
 import ExportModal from "./components/ExportModal";
+import ProjectExportModal from "./components/ProjectExportModal";
 import VectorEditor from "./components/VectorEditor";
 import WebtoonCutEditor from "./components/WebtoonCutEditor";
 import PreviewModal from "./components/PreviewModal";
 import SortCutsModal from "./components/SortCutsModal";
-import type { AIGeneratedImage } from "./components/AIImagePanel";
+import ScrollEditView from "./components/ScrollEditView";
+import type { AIGeneratedImage } from "./components/ImagePanel";
 
 export default function WebtoonEditor() {
   const [searchParams] = useSearchParams();
@@ -25,8 +27,13 @@ export default function WebtoonEditor() {
   const canvasHandleRef = useRef<DrawingCanvasHandle>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportInitialFormat, setExportInitialFormat] = useState<"png" | "jpeg" | "pdf">("png");
+  const [projectExportOpen, setProjectExportOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sortCutsOpen, setSortCutsOpen] = useState(false);
+  const [scrollEditMode, setScrollEditMode] = useState(false);
+  const [showRuler, setShowRuler] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const handleExport = (format: "png" | "jpeg" | "pdf") => {
     setExportInitialFormat(format);
@@ -44,49 +51,42 @@ export default function WebtoonEditor() {
   };
 
   const handleCutEditorApply = (offscreenCanvas: HTMLCanvasElement) => {
-    const mainCanvas = canvasHandleRef.current?.getCanvas();
-    if (!mainCanvas) return;
-    const ctx = mainCanvas.getContext("2d");
-    if (!ctx) return;
-    // 캔버스 중앙에 배치
-    const x = Math.round((800 - offscreenCanvas.width) / 2);
-    const y = Math.round((1100 - offscreenCanvas.height) / 2);
-    ctx.drawImage(offscreenCanvas, x, y);
+    // 캔버스 이미지로 등록해서 이동/크기조절/삭제 가능하게
+    const dataUrl = offscreenCanvas.toDataURL("image/png");
+    const cw = 800;
+    const ch = 1100;
+    const iw = offscreenCanvas.width;
+    const ih = offscreenCanvas.height;
+    const fitScale = Math.min(cw / iw, ch / ih, 1);
+    const drawW = Math.round(iw * fitScale);
+    const drawH = Math.round(ih * fitScale);
+    const x = Math.round((cw - drawW) / 2);
+    const y = Math.round((ch - drawH) / 2);
+    editor.addCanvasImage(dataUrl, x, y, drawW, drawH);
   };
 
   const handleApplyVectorToCanvas = () => {
-    const canvas = canvasHandleRef.current?.getCanvas();
-    if (!canvas) { vectorize.closeVectorEditor(); return; }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) { vectorize.closeVectorEditor(); return; }
-
-    // SVG를 캔버스에 렌더링 (비율 유지하며 중앙 배치)
+    // SVG를 data URL로 변환해서 canvasImage로 등록 (이동/크기조절 가능)
     const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vectorize.vectorSize.width} ${vectorize.vectorSize.height}" width="${vectorize.vectorSize.width}" height="${vectorize.vectorSize.height}">
       ${vectorize.vectorPaths.map((p) => `<path d="${p.d}" stroke="${p.strokeColor}" stroke-width="${p.strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="${p.opacity / 100}"/>`).join("")}
     </svg>`;
 
-    const blob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const cw = 800;
-      const ch = 1100;
-      const vw = vectorize.vectorSize.width;
-      const vh = vectorize.vectorSize.height;
-      const scale = Math.min(cw / vw, ch / vh, 1);
-      const drawW = vw * scale;
-      const drawH = vh * scale;
-      const x = Math.round((cw - drawW) / 2);
-      const y = Math.round((ch - drawH) / 2);
-      ctx.drawImage(img, x, y, drawW, drawH);
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = () => {
-      // eslint-disable-next-line no-console
-      console.error("[Vector] Failed to render SVG to canvas");
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+    // SVG를 data URL로 인코딩 (저장/로드 시에도 유지됨)
+    const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+
+    // 캔버스 중앙에 배치될 크기 계산
+    const cw = 800;
+    const ch = 1100;
+    const vw = vectorize.vectorSize.width;
+    const vh = vectorize.vectorSize.height;
+    const fitScale = Math.min(cw / vw, ch / vh, 1);
+    const drawW = Math.round(vw * fitScale);
+    const drawH = Math.round(vh * fitScale);
+    const x = Math.round((cw - drawW) / 2);
+    const y = Math.round((ch - drawH) / 2);
+
+    // canvasImage로 등록 → 캔버스 위에서 드래그/리사이즈 가능
+    editor.addCanvasImage(dataUrl, x, y, drawW, drawH);
     vectorize.closeVectorEditor();
   };
 
@@ -96,24 +96,83 @@ export default function WebtoonEditor() {
         saveStatus={editor.saveStatus}
         onSave={editor.handleSave}
         onExport={handleExport}
+        onProjectExport={() => setProjectExportOpen(true)}
         onUndo={editor.undo}
         onRedo={editor.redo}
         canUndo={editor.canUndo}
         canRedo={editor.canRedo}
+        scrollEditMode={scrollEditMode}
+        onToggleScrollEditMode={() => setScrollEditMode((v) => !v)}
+        zoom={editor.zoom}
+        onZoomIn={editor.zoomIn}
+        onZoomOut={editor.zoomOut}
+        onResetZoom={editor.resetZoom}
+        showRuler={showRuler}
+        onToggleRuler={() => setShowRuler((v) => !v)}
+        showGrid={showGrid}
+        onToggleGrid={() => setShowGrid((v) => !v)}
+        showGuide={showGuide}
+        onToggleGuide={() => setShowGuide((v) => !v)}
       />
 
       <div className="flex flex-1 overflow-hidden">
+        {scrollEditMode ? (
+          /* 세로 스크롤 편집 모드 */
+          <>
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <div className="flex items-center justify-between h-9 px-4 bg-[#111] border-b border-[#2a2a2a] shrink-0">
+                <div className="flex items-center gap-2">
+                  <i className="ri-layout-column-line text-[#888] text-sm" />
+                  <span className="text-[11px] text-[#888] font-medium whitespace-nowrap">세로 보기 편집 모드</span>
+                  <span className="text-[10px] text-[#555] whitespace-nowrap">
+                    — 컷을 클릭하면 해당 컷 편집으로 전환됩니다
+                  </span>
+                </div>
+                <button
+                  onClick={() => setScrollEditMode(false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1e1e1e] hover:bg-[#2a2a2a] text-[#aaa] hover:text-white text-[11px] transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <i className="ri-edit-line text-sm" />
+                  일반 편집으로 돌아가기
+                </button>
+              </div>
+              <ScrollEditView
+                cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
+                activeCutId={editor.activeCutId}
+                onSelectCut={(cutId) => {
+                  editor.setActiveCut(cutId);
+                  setScrollEditMode(false);
+                }}
+              />
+              <BottomTimeline
+                cuts={editor.cuts}
+                episodes={editor.episodes}
+                activeCutId={editor.activeCutId}
+                activeEpisodeId={editor.activeEpisodeId}
+                onSelectCut={editor.setActiveCut}
+                onSelectEpisode={editor.handleSelectEpisode}
+                onAddEpisode={editor.addEpisode}
+                onRenameEpisode={editor.renameEpisode}
+                onDeleteEpisode={editor.deleteEpisode}
+                onDeleteCut={editor.deleteCut}
+                onAddCut={editor.addCut}
+                onPreview={() => setPreviewOpen(true)}
+                onSortCuts={() => setSortCutsOpen(true)}
+              />
+            </div>
+          </>
+        ) : (
+          /* 일반 편집 모드 */
+          <>
         <LeftPanel
           activeTool={editor.activeTool}
           brushSize={editor.brushSize}
           onBrushSizeChange={editor.setBrushSize}
           brushOpacity={editor.brushOpacity}
           onBrushOpacityChange={editor.setBrushOpacity}
+          brushHardness={editor.brushHardness}
+          onBrushHardnessChange={editor.setBrushHardness}
           onSelectTool={editor.setActiveTool}
-          promptText={editor.promptText}
-          onPromptChange={editor.setPromptText}
-          isGenerating={editor.isGenerating}
-          onGenerate={editor.handleGenerate}
           generatedImages={editor.generatedImages}
           onApplyImage={editor.handleApplyImageToCanvas}
           onVectorize={handleVectorize}
@@ -152,6 +211,8 @@ export default function WebtoonEditor() {
               onBrushSizeChange={editor.setBrushSize}
               opacity={editor.brushOpacity}
               onOpacityChange={editor.setBrushOpacity}
+              hardness={editor.brushHardness}
+              onHardnessChange={editor.setBrushHardness}
             />
 
             <DrawingCanvas
@@ -159,6 +220,7 @@ export default function WebtoonEditor() {
               activeTool={editor.activeTool}
               brushSize={editor.brushSize}
               opacity={editor.brushOpacity}
+              hardness={editor.brushHardness}
               foregroundColor={editor.foregroundColor}
               zoom={editor.zoom}
               onZoomIn={editor.zoomIn}
@@ -167,6 +229,7 @@ export default function WebtoonEditor() {
               canvasImages={editor.canvasImages}
               onUpdateCanvasImage={editor.updateCanvasImage}
               onDeleteCanvasImage={editor.deleteCanvasImage}
+              onUpdateCanvasImageLayerPosition={editor.updateCanvasImageLayerPosition}
               strokes={editor.strokes}
               selectedStrokeIds={editor.selectedStrokeIds}
               onAddStroke={editor.addStroke}
@@ -185,6 +248,12 @@ export default function WebtoonEditor() {
               onDeleteBalloon={editor.deleteBalloon}
               layers={editor.layers}
               selectedLayerId={editor.selectedLayerId}
+              onUpdateLayerImage={editor.updateLayerImage}
+              rulerVisible={showRuler}
+              gridVisible={showGrid}
+              guideVisible={showGuide}
+              onToggleRuler={() => setShowRuler((v) => !v)}
+              onToggleGrid={() => setShowGrid((v) => !v)}
             />
           </div>
 
@@ -198,34 +267,10 @@ export default function WebtoonEditor() {
             onAddEpisode={editor.addEpisode}
             onRenameEpisode={editor.renameEpisode}
             onDeleteEpisode={editor.deleteEpisode}
+            onDeleteCut={editor.deleteCut}
             onAddCut={editor.addCut}
             onPreview={() => setPreviewOpen(true)}
             onSortCuts={() => setSortCutsOpen(true)}
-          />
-
-          <PreviewModal
-            isOpen={previewOpen}
-            onClose={() => setPreviewOpen(false)}
-            cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
-            episodeTitle={editor.episodes.find((e) => e.id === editor.activeEpisodeId)?.title ?? "미리보기"}
-          />
-
-          <SortCutsModal
-            isOpen={sortCutsOpen}
-            onClose={() => setSortCutsOpen(false)}
-            cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
-            onReorder={(orderedIds) => {
-              // 순서 재정렬: orderedIds 순서로 index를 1부터 다시 매김
-              const currentEpId = editor.activeEpisodeId;
-              editor.setCuts((prev) => {
-                const others = prev.filter((c) => c.episodeId !== currentEpId);
-                const reordered = orderedIds.map((id, idx) => {
-                  const found = prev.find((c) => c.id === id);
-                  return found ? { ...found, index: idx + 1, label: `컷 ${idx + 1}` } : null;
-                }).filter(Boolean) as typeof prev;
-                return [...others, ...reordered];
-              });
-            }}
           />
         </div>
 
@@ -248,9 +293,12 @@ export default function WebtoonEditor() {
               onAddLayer={editor.addLayer}
               onDeleteLayer={editor.deleteLayer}
               onReorderLayers={editor.reorderLayers}
+              balloons={editor.balloons}
             />
           </div>
         </div>
+          </>
+        )}
       </div>
 
       <ExportModal
@@ -259,6 +307,38 @@ export default function WebtoonEditor() {
         getCanvas={() => canvasHandleRef.current?.getCanvas() ?? null}
         getCompositeCanvas={() => canvasHandleRef.current?.getCompositeCanvas() ?? Promise.resolve(null)}
         initialFormat={exportInitialFormat}
+      />
+
+      <ProjectExportModal
+        isOpen={projectExportOpen}
+        onClose={() => setProjectExportOpen(false)}
+        cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
+        episodeTitle={editor.episodes.find((e) => e.id === editor.activeEpisodeId)?.title ?? "에피소드"}
+      />
+
+      <PreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
+        episodeTitle={editor.episodes.find((e) => e.id === editor.activeEpisodeId)?.title ?? "미리보기"}
+      />
+
+      <SortCutsModal
+        isOpen={sortCutsOpen}
+        onClose={() => setSortCutsOpen(false)}
+        cuts={editor.cuts.filter((c) => c.episodeId === editor.activeEpisodeId)}
+        onReorder={(orderedIds) => {
+          // 순서 재정렬: orderedIds 순서로 index를 1부터 다시 매김
+          const currentEpId = editor.activeEpisodeId;
+          editor.setCuts((prev) => {
+            const others = prev.filter((c) => c.episodeId !== currentEpId);
+            const reordered = orderedIds.map((id, idx) => {
+              const found = prev.find((c) => c.id === id);
+              return found ? { ...found, index: idx + 1, label: `컷 ${idx + 1}` } : null;
+            }).filter(Boolean) as typeof prev;
+            return [...others, ...reordered];
+          });
+        }}
       />
 
       {cutEditorImage && (

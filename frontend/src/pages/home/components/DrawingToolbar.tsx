@@ -8,6 +8,8 @@ interface DrawingToolbarProps {
   onBrushSizeChange: (size: number) => void;
   opacity: number;
   onOpacityChange: (v: number) => void;
+  hardness: number;
+  onHardnessChange: (v: number) => void;
 }
 
 const toolGroups: { tools: { id: DrawingTool; icon: string; label: string; shortcut: string }[] }[] = [
@@ -59,8 +61,12 @@ export default function DrawingToolbar({
   onBrushSizeChange,
   opacity,
   onOpacityChange,
+  hardness,
+  onHardnessChange,
 }: DrawingToolbarProps) {
   const [showSizePopup, setShowSizePopup] = useState(false);
+
+  const isDrawingTool = ["pen", "brush", "pencil", "marker", "eraser"].includes(activeTool);
 
   return (
     <div className="w-12 bg-[#1a1a1a] border-r border-[#2a2a2a] flex flex-col items-center shrink-0 h-full">
@@ -92,16 +98,20 @@ export default function DrawingToolbar({
         <div className="w-6 h-px bg-[#2a2a2a] my-1.5" />
       </div>
 
-      {/* 맨 아래 브러시 크기 버튼 - 항상 고정 표시 */}
+      {/* 맨 아래 브러시 설정 버튼 - 항상 고정 표시 */}
       <div className="relative w-full flex flex-col items-center py-2">
         <button
-          title={`브러시 크기: ${brushSize}px`}
+          title={`브러시 크기: ${brushSize}px · 경도: ${hardness}%`}
           onClick={() => setShowSizePopup((v) => !v)}
           className="w-9 h-9 flex flex-col items-center justify-center gap-0.5 rounded-lg hover:bg-[#2a2a2a] cursor-pointer transition-colors"
         >
           <div
             className="rounded-full bg-[#ccc]"
-            style={{ width: Math.min(brushSize, 20), height: Math.min(brushSize, 20) }}
+            style={{
+              width: Math.min(brushSize, 20),
+              height: Math.min(brushSize, 20),
+              filter: hardness < 100 ? `blur(${(100 - hardness) * 0.03}px)` : undefined,
+            }}
           />
           <span className="text-[8px] text-[#666]">{brushSize}</span>
         </button>
@@ -146,6 +156,8 @@ export default function DrawingToolbar({
                 </button>
               ))}
             </div>
+
+            {/* 불투명도 */}
             <p className="text-[10px] text-[#888] mt-3 mb-2 font-medium">불투명도</p>
             <div className="flex items-center gap-2">
               <input
@@ -161,6 +173,56 @@ export default function DrawingToolbar({
               />
               <span className="text-xs text-[#ccc] w-8 text-right">{opacity}%</span>
             </div>
+
+            {/* 경도 (Hardness) */}
+            {isDrawingTool && activeTool !== "eraser" && (
+              <>
+                <p className="text-[10px] text-[#888] mt-3 mb-2 font-medium">경도</p>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-5 h-5 rounded-full bg-[#ccc] shrink-0 transition-all"
+                    style={{ filter: hardness < 100 ? `blur(${(100 - hardness) * 0.05}px)` : undefined }}
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={hardness}
+                    onChange={(e) => onHardnessChange(Number(e.target.value))}
+                    className="flex-1 h-1.5 appearance-none rounded-full cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, rgba(249,115,22,0.3) ${hardness}%, #f97316 ${hardness}%)`,
+                    }}
+                  />
+                  <span className="text-xs text-[#ccc] w-7 text-right font-mono">{hardness}</span>
+                </div>
+                <div className="flex justify-between mt-2.5 gap-0.5">
+                  {[0, 25, 50, 75, 100].map((h) => (
+                    <button
+                      key={h}
+                      onClick={() => onHardnessChange(h)}
+                      title={`경도 ${h}`}
+                      className={`flex items-center justify-center cursor-pointer rounded-md transition-all w-full ${
+                        hardness === h
+                          ? "bg-orange-500/15 ring-1 ring-orange-500/40"
+                          : "hover:bg-[#2a2a2a]"
+                      }`}
+                      style={{ height: 22 }}
+                    >
+                      <div
+                        className="rounded-full bg-[#ccc]"
+                        style={{
+                          width: 24,
+                          height: Math.max(1.5, 5 - h * 0.035),
+                          filter: h < 100 ? `blur(${(100 - h) * 0.06}px)` : undefined,
+                          opacity: h < 10 ? 0.4 : 0.85,
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </>
         )}

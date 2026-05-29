@@ -4,6 +4,7 @@ export type BalloonShape = "round" | "rect" | "cloud" | "spiky" | "shout" | "whi
 
 export interface BalloonItem {
   id: string;
+  layerId: string;
   shape: BalloonShape;
   x: number;
   y: number;

@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
-import { mockPresets } from "@/mocks/webtoon";
+import { mockCharacters, mockBackgrounds, mockPresets } from "@/mocks/webtoon";
 import { listLoras, createCharacterFromLora, type LoraCatalogItem, type CharacterModelDetail } from "@/lib/characterApi";
 import { listBackgrounds, type BackgroundAssetSummary } from "@/lib/backgroundApi";
 import type { DrawingTool } from "@/hooks/useEditorState";
 import BalloonPanel from "./BalloonPanel";
 import type { BalloonShape, BalloonItem } from "./BalloonPanel";
-import AIImagePanel from "./AIImagePanel";
-import type { AIGeneratedImage } from "./AIImagePanel";
+import ImagePanel from "./ImagePanel";
+import type { AIGeneratedImage } from "./ImagePanel";
 import ScenarioGeneratePanel from "./ScenarioGeneratePanel";
 import BackgroundLibraryPanel from "./BackgroundLibraryPanel";
 
-type TabType = "tool" | "library" | "ai" | "balloon" | "scenario" | "background";
+type TabType = "tool" | "library" | "image" | "balloon" | "scenario" | "background";
 
 interface LeftPanelProps {
   activeTool: DrawingTool;
@@ -18,11 +18,9 @@ interface LeftPanelProps {
   onBrushSizeChange: (v: number) => void;
   brushOpacity: number;
   onBrushOpacityChange: (v: number) => void;
+  brushHardness: number;
+  onBrushHardnessChange: (v: number) => void;
   onSelectTool: (tool: DrawingTool) => void;
-  promptText: string;
-  onPromptChange: (v: string) => void;
-  isGenerating: boolean;
-  onGenerate: (prompt: string) => void;
   generatedImages: AIGeneratedImage[];
   onApplyImage: (img: AIGeneratedImage) => void;
   onVectorize: (img: AIGeneratedImage) => void;
@@ -49,7 +47,7 @@ interface LeftPanelProps {
   selectedBalloonId: string | null;
   updateBalloon: (id: string, updates: Partial<Omit<BalloonItem, "id">>) => void;
   balloons: BalloonItem[];
-  // 활성 프로젝트/에피소드 ID (ScenarioGeneratePanel로 전달) — 1-C-4
+  // 활성 프로젝트/에피소드 ID (ScenarioGeneratePanel로 전달)
   activeProjectId: string | null;
   activeEpisodeId: string;
 }
@@ -61,15 +59,15 @@ const BASE_URL =
 const toAbsoluteImageUrl = (path: string | null | undefined): string =>
   !path ? "" : path.startsWith("http") ? path : `${BASE_URL}${path}`;
 
-const BRUSH_PRESETS: { name: string; icon: string; size: number; opacity: number; tool: DrawingTool }[] = [
-  { name: "G펜", icon: "ri-pen-nib-line", size: 3, opacity: 100, tool: "pen" },
-  { name: "밀크펜", icon: "ri-pen-nib-line", size: 5, opacity: 90, tool: "pen" },
-  { name: "수채화", icon: "ri-brush-line", size: 20, opacity: 60, tool: "brush" },
-  { name: "에어브러시", icon: "ri-brush-2-line", size: 40, opacity: 30, tool: "brush" },
-  { name: "연필", icon: "ri-pencil-line", size: 4, opacity: 70, tool: "pencil" },
-  { name: "마커", icon: "ri-mark-pen-line", size: 15, opacity: 80, tool: "marker" },
-  { name: "지우개", icon: "ri-eraser-line", size: 20, opacity: 100, tool: "eraser" },
-  { name: "두꺼운 펜", icon: "ri-pen-nib-fill", size: 8, opacity: 100, tool: "pen" },
+const BRUSH_PRESETS: { name: string; icon: string; size: number; opacity: number; hardness: number; tool: DrawingTool }[] = [
+  { name: "G펜", icon: "ri-pen-nib-line", size: 3, opacity: 100, hardness: 95, tool: "pen" },
+  { name: "밀크펜", icon: "ri-pen-nib-line", size: 5, opacity: 90, hardness: 90, tool: "pen" },
+  { name: "수채화", icon: "ri-brush-line", size: 20, opacity: 60, hardness: 40, tool: "brush" },
+  { name: "에어브러시", icon: "ri-brush-2-line", size: 40, opacity: 30, hardness: 0, tool: "brush" },
+  { name: "연필", icon: "ri-pencil-line", size: 4, opacity: 70, hardness: 85, tool: "pencil" },
+  { name: "마커", icon: "ri-mark-pen-line", size: 15, opacity: 80, hardness: 55, tool: "marker" },
+  { name: "지우개", icon: "ri-eraser-line", size: 20, opacity: 100, hardness: 100, tool: "eraser" },
+  { name: "두꺼운 펜", icon: "ri-pen-nib-fill", size: 8, opacity: 100, hardness: 90, tool: "pen" },
 ];
 
 export default function LeftPanel({
@@ -78,11 +76,9 @@ export default function LeftPanel({
   onBrushSizeChange,
   brushOpacity,
   onBrushOpacityChange,
+  brushHardness,
+  onBrushHardnessChange,
   onSelectTool,
-  promptText,
-  onPromptChange,
-  isGenerating,
-  onGenerate,
   generatedImages,
   onApplyImage,
   onVectorize,
@@ -159,15 +155,6 @@ export default function LeftPanel({
 
   const [pendingBackgroundAssetId, setPendingBackgroundAssetId] = useState<number | null>(null);
 
-  const tabs: { key: TabType; icon: string; label: string }[] = [
-    { key: "tool", icon: "ri-brush-line", label: "도구" },
-    { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
-    { key: "library", icon: "ri-image-2-line", label: "소재" },
-    { key: "ai", icon: "ri-sparkling-line", label: "AI" },
-    { key: "scenario", icon: "ri-film-line", label: "시나리오" },
-    { key: "background", icon: "ri-landscape-line", label: "배경" },
-  ];
-
   const loraCards = loras.map((l) => ({
     id: `lora-${l.id}`,
     name: l.displayName,
@@ -184,7 +171,18 @@ export default function LeftPanel({
     description: "",
   }));
 
+  const tabs: { key: TabType; icon: string; label: string }[] = [
+    { key: "tool", icon: "ri-brush-line", label: "도구" },
+    { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
+    { key: "library", icon: "ri-image-2-line", label: "소재" },
+    { key: "image", icon: "ri-quill-pen-line", label: "선화 편집" },
+    { key: "scenario", icon: "ri-film-line", label: "시나리오" },
+    { key: "background", icon: "ri-landscape-line", label: "배경" },
+  ];
+
   const filteredItems = [
+    ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? mockCharacters : []),
+    ...(libraryFilter === "전체" || libraryFilter === "배경" ? mockBackgrounds : []),
     ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? loraCards : []),
     ...(libraryFilter === "전체" || libraryFilter === "배경" ? backgroundCards : []),
   ].filter(
@@ -198,7 +196,6 @@ export default function LeftPanel({
     setSelectedPresets((prev) =>
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
     );
-    onPromptChange(promptText ? `${promptText}, ${prompt}` : prompt);
   };
 
   const handleBalloonTabClick = () => {
@@ -248,6 +245,7 @@ export default function LeftPanel({
                     setSelectedBrushPreset(i);
                     onBrushSizeChange(preset.size);
                     onBrushOpacityChange(preset.opacity);
+                    onBrushHardnessChange(preset.hardness);
                     onSelectTool(preset.tool);
                   }}
                   title={preset.name}
@@ -272,10 +270,10 @@ export default function LeftPanel({
               <div className="flex items-center gap-1">
                 <button onClick={() => onBrushSizeChange(Math.max(1, brushSize - 1))} className="w-5 h-5 flex items-center justify-center bg-[#1e1e1e] rounded text-[#888] hover:text-[#ccc] cursor-pointer text-xs"><i className="ri-subtract-line" /></button>
                 <span className="text-xs text-[#ccc] w-8 text-center font-mono">{brushSize}</span>
-                <button onClick={() => onBrushSizeChange(Math.min(500, brushSize + 1))} className="w-5 h-5 flex items-center justify-center bg-[#1e1e1e] rounded text-[#888] hover:text-[#ccc] cursor-pointer text-xs"><i className="ri-add-line" /></button>
+                <button onClick={() => onBrushSizeChange(Math.min(200, brushSize + 1))} className="w-5 h-5 flex items-center justify-center bg-[#1e1e1e] rounded text-[#888] hover:text-[#ccc] cursor-pointer text-xs"><i className="ri-add-line" /></button>
               </div>
             </div>
-            <input type="range" min={1} max={500} value={brushSize} onChange={(e) => onBrushSizeChange(Number(e.target.value))} className="w-full h-1.5 appearance-none rounded-full cursor-pointer" style={{ background: `linear-gradient(to right, #f97316 ${brushSize / 5}%, #2a2a2a ${brushSize / 5}%)` }} />
+            <input type="range" min={1} max={200} value={brushSize} onChange={(e) => onBrushSizeChange(Number(e.target.value))} className="w-full h-1.5 appearance-none rounded-full cursor-pointer" style={{ background: `linear-gradient(to right, #f97316 ${brushSize / 2}%, #2a2a2a ${brushSize / 2}%)` }} />
             <div className="flex items-center justify-center mt-2 h-8">
               <div className="rounded-full bg-[#ccc]" style={{ width: Math.min(brushSize * 0.5, 60), height: Math.min(brushSize * 0.5, 60) }} />
             </div>
@@ -289,17 +287,49 @@ export default function LeftPanel({
             <input type="range" min={1} max={100} value={brushOpacity} onChange={(e) => onBrushOpacityChange(Number(e.target.value))} className="w-full h-1.5 appearance-none rounded-full cursor-pointer" style={{ background: `linear-gradient(to right, #f97316 ${brushOpacity}%, #2a2a2a ${brushOpacity}%)` }} />
           </div>
 
-          <div className="p-3">
-            <p className="text-[9px] text-[#555] uppercase tracking-wider font-medium mb-2">브러시 설정</p>
-            <div className="space-y-2">
-              {[{ label: "경도", value: 80 }, { label: "번짐", value: 20 }, { label: "간격", value: 10 }].map((setting) => (
-                <div key={setting.label}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] text-[#888]">{setting.label}</span>
-                    <span className="text-[10px] text-[#666]">{setting.value}%</span>
-                  </div>
-                  <input type="range" min={0} max={100} defaultValue={setting.value} className="w-full h-1 appearance-none rounded-full cursor-pointer" style={{ background: `linear-gradient(to right, #555 ${setting.value}%, #2a2a2a ${setting.value}%)` }} />
-                </div>
+          <div className="p-3 border-b border-[#2a2a2a]">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[9px] text-[#555] uppercase tracking-wider font-medium">경도</p>
+              <div className="flex items-center gap-1.5">
+                <div
+                  className="w-5 h-5 rounded-full bg-[#ccc] transition-all"
+                  style={{ filter: brushHardness < 100 ? `blur(${(100 - brushHardness) * 0.05}px)` : undefined }}
+                />
+                <span className="text-xs text-[#ccc] font-mono">{brushHardness}</span>
+              </div>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={brushHardness}
+              onChange={(e) => onBrushHardnessChange(Number(e.target.value))}
+              className="w-full h-1.5 appearance-none rounded-full cursor-pointer"
+              style={{ background: `linear-gradient(to right, rgba(249,115,22,0.3) ${brushHardness}%, #f97316 ${brushHardness}%)` }}
+            />
+            <div className="flex justify-between mt-2.5 gap-0.5">
+              {[0, 25, 50, 75, 100].map((h) => (
+                <button
+                  key={h}
+                  onClick={() => onBrushHardnessChange(h)}
+                  title={`경도 ${h}`}
+                  className={`flex items-center justify-center cursor-pointer rounded-md transition-all w-full ${
+                    brushHardness === h
+                      ? "bg-orange-500/15 ring-1 ring-orange-500/40"
+                      : "hover:bg-[#222]"
+                  }`}
+                  style={{ height: 24 }}
+                >
+                  <div
+                    className="rounded-full bg-[#ccc]"
+                    style={{
+                      width: 28,
+                      height: Math.max(1.5, 5 - h * 0.035),
+                      filter: h < 100 ? `blur(${(100 - h) * 0.06}px)` : undefined,
+                      opacity: h < 10 ? 0.4 : 0.85,
+                    }}
+                  />
+                </button>
               ))}
             </div>
           </div>
@@ -397,13 +427,9 @@ export default function LeftPanel({
         </div>
       )}
 
-      {/* AI 탭 */}
-      {activeTab === "ai" && (
-        <AIImagePanel
-          promptText={promptText}
-          onPromptChange={onPromptChange}
-          isGenerating={isGenerating}
-          onGenerate={onGenerate}
+      {/* 선화 편집 탭 */}
+      {activeTab === "image" && (
+        <ImagePanel
           generatedImages={generatedImages}
           onApplyImage={onApplyImage}
           onVectorize={onVectorize}

@@ -6,13 +6,26 @@ interface EditorHeaderProps {
   saveStatus: "saved" | "saving" | "unsaved";
   onSave: () => void;
   onExport: (format: "png" | "jpeg" | "pdf") => void;
+  onProjectExport: () => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  scrollEditMode: boolean;
+  onToggleScrollEditMode: () => void;
+  zoom: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
+  showRuler: boolean;
+  onToggleRuler: () => void;
+  showGrid: boolean;
+  onToggleGrid: () => void;
+  showGuide: boolean;
+  onToggleGuide: () => void;
 }
 
-export default function EditorHeader({ saveStatus, onSave, onExport, onUndo, onRedo, canUndo, canRedo }: EditorHeaderProps) {
+export default function EditorHeader({ saveStatus, onSave, onExport, onProjectExport, onUndo, onRedo, canUndo, canRedo, scrollEditMode, onToggleScrollEditMode, zoom, onZoomIn, onZoomOut, onResetZoom, showRuler, onToggleRuler, showGrid, onToggleGrid, showGuide, onToggleGuide }: EditorHeaderProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -71,16 +84,23 @@ export default function EditorHeader({ saveStatus, onSave, onExport, onUndo, onR
       { label: "캔버스 크기 변경", icon: "ri-crop-line", shortcut: "", action: () => { closeAllMenus(); } },
     ],
     view: [
-      { label: "확대", icon: "ri-zoom-in-line", shortcut: "Ctrl++", action: () => { closeAllMenus(); } },
-      { label: "축소", icon: "ri-zoom-out-line", shortcut: "Ctrl+-", action: () => { closeAllMenus(); } },
-      { label: "100% 보기", icon: "ri-fullscreen-line", shortcut: "Ctrl+0", action: () => { closeAllMenus(); } },
+      { label: "확대", icon: "ri-zoom-in-line", shortcut: `Ctrl++ (${zoom}%)`, action: () => { closeAllMenus(); onZoomIn(); } },
+      { label: "축소", icon: "ri-zoom-out-line", shortcut: "Ctrl+-", action: () => { closeAllMenus(); onZoomOut(); } },
+      { label: "100% 보기", icon: "ri-fullscreen-line", shortcut: "Ctrl+0", action: () => { closeAllMenus(); onResetZoom(); } },
       null,
-      { label: "눈금자 표시", icon: "ri-ruler-line", shortcut: "Ctrl+R", action: () => { closeAllMenus(); } },
-      { label: "격자 표시", icon: "ri-grid-line", shortcut: "Ctrl+'", action: () => { closeAllMenus(); } },
-      { label: "가이드라인", icon: "ri-guide-line", shortcut: "", action: () => { closeAllMenus(); } },
+      { label: "눈금자 표시", icon: "ri-ruler-line", shortcut: "Ctrl+R", action: () => { closeAllMenus(); onToggleRuler(); }, checked: showRuler },
+      { label: "격자 표시", icon: "ri-grid-line", shortcut: "Ctrl+'", action: () => { closeAllMenus(); onToggleGrid(); }, checked: showGrid },
+      { label: "가이드라인", icon: "ri-guide-line", shortcut: "Ctrl+G", action: () => { closeAllMenus(); onToggleGuide(); }, checked: showGuide },
     ],
   };
 
+  type MenuItem = {
+    label: string;
+    icon: string;
+    shortcut: string;
+    action: () => void;
+    checked?: boolean;
+  };
   type MenuKey = keyof typeof menuItems;
 
   const renderMenu = (key: MenuKey, isOpen: boolean) => {
@@ -98,10 +118,13 @@ export default function EditorHeader({ saveStatus, onSave, onExport, onUndo, onR
               className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-[#ccc] hover:bg-[#2a2a2a] transition-colors cursor-pointer whitespace-nowrap"
             >
               <div className="flex items-center gap-2">
-                <i className={`${item.icon} text-[#666]`} />
+                <i className={`${item.icon} ${item.checked ? "text-orange-400" : "text-[#666]"}`} />
                 <span>{item.label}</span>
               </div>
-              {item.shortcut && <span className="text-[10px] text-[#555]">{item.shortcut}</span>}
+              <div className="flex items-center gap-1.5">
+                {item.checked && <i className="ri-check-line text-orange-400 text-[10px]" />}
+                {item.shortcut && <span className="text-[10px] text-[#555]">{item.shortcut}</span>}
+              </div>
             </button>
           )
         )}
@@ -219,6 +242,20 @@ export default function EditorHeader({ saveStatus, onSave, onExport, onUndo, onR
 
       <div className="w-px h-5 bg-[#2a2a2a] mx-1" />
 
+      {/* 세로 보기 모드 토글 */}
+      <button
+        onClick={onToggleScrollEditMode}
+        className={`flex items-center gap-1.5 px-2.5 h-7 rounded text-xs transition-colors cursor-pointer whitespace-nowrap ${
+          scrollEditMode
+            ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+            : "text-[#888] hover:bg-[#2a2a2a] hover:text-[#ccc]"
+        }`}
+        title="세로 스크롤 편집 모드"
+      >
+        <i className={`text-sm ${scrollEditMode ? "ri-layout-column-fill" : "ri-layout-column-line"}`} />
+        세로 보기
+      </button>
+
       {/* 저장 */}
       <button
         onClick={onSave}
@@ -255,6 +292,15 @@ export default function EditorHeader({ saveStatus, onSave, onExport, onUndo, onR
                 {item.label}
               </button>
             ))}
+            <div className="h-px bg-[#2a2a2a] my-1 mx-2" />
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#2a2a2a] transition-colors cursor-pointer whitespace-nowrap"
+              onClick={() => { onProjectExport(); closeAllMenus(); }}
+            >
+              <i className="ri-folder-zip-line" />
+              프로젝트 ZIP으로 내보내기
+            </button>
           </div>
         )}
       </div>

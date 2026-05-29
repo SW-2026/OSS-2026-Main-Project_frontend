@@ -1,49 +1,210 @@
 import { useCallback, useState } from "react";
 import type { VectorPath } from "@/pages/home/components/VectorEditor";
 
-// Canvas 기반 Edge Detection (Sobel Filter)
-function applySobelFilter(imageData: ImageData): Uint8ClampedArray {
-  const { data, width, height } = imageData;
-  const output = new Uint8ClampedArray(data.length);
+// ─── Zhang-Suen 골격화 (Skeletonization) ───
+// 이진 이미지의 선을 1px 두께 골격으로 축소
+function zhangSuenThinning(binary: Uint8Array, width: number, height: number): Uint8Array {
+  const skeleton = new Uint8Array(binary);
+  let changed = true;
 
-  const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-  const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+  const neighbors = (x: number, y: number): [number, number, number, number, number, number, number, number] => {
+    const idx = (y - 1) * width + x;     const p2 = skeleton[idx] > 0 ? 1 : 0;
+    const idx3 = (y - 1) * width + (x + 1); const p3 = skeleton[idx3] > 0 ? 1 : 0;
+    const idx4 = y * width + (x + 1);       const p4 = skeleton[idx4] > 0 ? 1 : 0;
+    const idx5 = (y + 1) * width + (x + 1); const p5 = skeleton[idx5] > 0 ? 1 : 0;
+    const idx6 = (y + 1) * width + x;     const p6 = skeleton[idx6] > 0 ? 1 : 0;
+    const idx7 = (y + 1) * width + (x - 1); const p7 = skeleton[idx7] > 0 ? 1 : 0;
+    const idx8 = y * width + (x - 1);       const p8 = skeleton[idx8] > 0 ? 1 : 0;
+    const idx9 = (y - 1) * width + (x - 1); const p9 = skeleton[idx9] > 0 ? 1 : 0;
+    return [p2, p3, p4, p5, p6, p7, p8, p9];
+  };
 
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      let gx = 0;
-      let gy = 0;
+  while (changed) {
+    changed = false;
+    const toRemove: number[] = [];
 
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++) {
-          const idx = ((y + ky) * width + (x + kx)) * 4;
-          const gray = (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
-          const ki = (ky + 1) * 3 + (kx + 1);
-          gx += sobelX[ki] * gray;
-          gy += sobelY[ki] * gray;
+    // ── Step 1 ──
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        if (skeleton[idx] === 0) continue;
+
+        const [p2, p3, p4, p5, p6, p7, p8, p9] = neighbors(x, y);
+        const nbrs = [p2, p3, p4, p5, p6, p7, p8, p9];
+        const nCount = nbrs.reduce((a, b) => a + b, 0);
+        if (nCount < 2 || nCount > 6) continue;
+
+        let transitions = 0;
+        for (let i = 0; i < 8; i++) {
+          if (nbrs[i] === 0 && nbrs[(i + 1) % 8] === 1) transitions++;
         }
-      }
+        if (transitions !== 1) continue;
 
-      const magnitude = Math.min(255, Math.sqrt(gx * gx + gy * gy));
-      const outIdx = (y * width + x) * 4;
-      output[outIdx] = magnitude;
-      output[outIdx + 1] = magnitude;
-      output[outIdx + 2] = magnitude;
-      output[outIdx + 3] = 255;
+        if (p2 * p4 * p6 !== 0) continue;
+        if (p4 * p6 * p8 !== 0) continue;
+
+        toRemove.push(idx);
+      }
+    }
+    if (toRemove.length > 0) { changed = true; for (const i of toRemove) skeleton[i] = 0; }
+
+    // ── Step 2 ──
+    toRemove.length = 0;
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        if (skeleton[idx] === 0) continue;
+
+        const [p2, p3, p4, p5, p6, p7, p8, p9] = neighbors(x, y);
+        const nbrs = [p2, p3, p4, p5, p6, p7, p8, p9];
+        const nCount = nbrs.reduce((a, b) => a + b, 0);
+        if (nCount < 2 || nCount > 6) continue;
+
+        let transitions = 0;
+        for (let i = 0; i < 8; i++) {
+          if (nbrs[i] === 0 && nbrs[(i + 1) % 8] === 1) transitions++;
+        }
+        if (transitions !== 1) continue;
+
+        if (p2 * p4 * p8 !== 0) continue;
+        if (p2 * p6 * p8 !== 0) continue;
+
+        toRemove.push(idx);
+      }
+    }
+    if (toRemove.length > 0) { changed = true; for (const i of toRemove) skeleton[i] = 0; }
+  }
+
+  return skeleton;
+}
+
+// ─── 골격에서 엔드포인트/분기점 기반 경로 추적 ───
+function traceSkeletonPaths(skeleton: Uint8Array, width: number, height: number): VectorPath[] {
+  const visited = new Uint8Array(width * height);
+  const paths: VectorPath[] = [];
+  let pathId = 0;
+  const MAX_PATHS = 500;
+
+  const countNeighbors = (x: number, y: number): number => {
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height && skeleton[ny * width + nx] > 0) count++;
+      }
+    }
+    return count;
+  };
+
+  const DIRS: [number, number][] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+
+  // 엔드포인트 찾기 (이웃 1개 = 끝점)
+  const endpoints: { x: number; y: number }[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (skeleton[y * width + x] > 0 && countNeighbors(x, y) === 1) {
+        endpoints.push({ x, y });
+      }
     }
   }
 
-  return output;
+  // 엔드포인트에서 출발하여 분기점/다른 엔드포인트까지 추적
+  for (const ep of endpoints) {
+    if (visited[ep.y * width + ep.x]) continue;
+    if (paths.length >= MAX_PATHS) break;
+
+    const points: { x: number; y: number }[] = [{ x: ep.x, y: ep.y }];
+    visited[ep.y * width + ep.x] = 1;
+
+    let cx = ep.x, cy = ep.y;
+    while (true) {
+      let found = false;
+      for (const [dx, dy] of DIRS) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const nIdx = ny * width + nx;
+          if (skeleton[nIdx] > 0 && !visited[nIdx]) {
+            cx = nx; cy = ny;
+            visited[nIdx] = 1;
+            points.push({ x: cx, y: cy });
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) break;
+      const n = countNeighbors(cx, cy);
+      if (n >= 3 || n === 1) break; // 분기점 또는 다른 엔드포인트 도달
+    }
+
+    if (points.length >= 3) {
+      const simplified = simplifyPoints(points, 1.5);
+      paths.push({
+        id: `path-${pathId++}`,
+        d: pointsToSmoothPath(simplified),
+        strokeWidth: 1.5,
+        strokeColor: "#000000",
+        opacity: 100,
+        points: simplified,
+      });
+    }
+  }
+
+  // 남은 골격 픽셀 처리 (고립된 루프, 분기점에서 분기점)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (skeleton[idx] === 0 || visited[idx]) continue;
+      if (paths.length >= MAX_PATHS) break;
+
+      const points: { x: number; y: number }[] = [{ x, y }];
+      visited[idx] = 1;
+      let cx = x, cy = y;
+
+      while (true) {
+        let found = false;
+        for (const [dx, dy] of DIRS) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            const nIdx = ny * width + nx;
+            if (skeleton[nIdx] > 0 && !visited[nIdx]) {
+              cx = nx; cy = ny;
+              visited[nIdx] = 1;
+              points.push({ x: cx, y: cy });
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) break;
+        if (countNeighbors(cx, cy) >= 3) break;
+      }
+
+      if (points.length >= 3) {
+        const simplified = simplifyPoints(points, 1.5);
+        paths.push({
+          id: `path-${pathId++}`,
+          d: pointsToSmoothPath(simplified),
+          strokeWidth: 1.5,
+          strokeColor: "#000000",
+          opacity: 100,
+          points: simplified,
+        });
+      }
+    }
+  }
+
+  return paths;
 }
 
-// AI 컬러 이미지를 고대비 라인아트로 전처리 (색상/그라데이션 제거, 선만 남김)
-function preprocessToLineArt(imageData: ImageData, threshold: number = 140): ImageData {
+// ─── AI 컬러 이미지를 고대비 라인아트로 전처리 ───
+function preprocessToLineArt(imageData: ImageData, threshold: number = 120): ImageData {
   const { data, width, height } = imageData;
   const output = new ImageData(width, height);
 
   for (let i = 0; i < data.length; i += 4) {
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    // 어두운 픽셀은 선(0), 밝은 픽셀은 배경(255)
     const val = gray < threshold ? 0 : 255;
     output.data[i] = val;
     output.data[i + 1] = val;
@@ -54,123 +215,33 @@ function preprocessToLineArt(imageData: ImageData, threshold: number = 140): Ima
   return output;
 }
 
-// 엣지 픽셀을 경로로 변환 (간단한 연결 알고리즘)
-function edgePixelsToSVGPaths(
-  edgeData: Uint8ClampedArray,
-  width: number,
-  height: number,
-  threshold: number = 80,
-  simplify: number = 3
-): VectorPath[] {
-  const visited = new Uint8Array(width * height);
-  const paths: VectorPath[] = [];
-
-  const getEdge = (x: number, y: number): boolean => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    const idx = (y * width + x) * 4;
-    return edgeData[idx] > threshold;
-  };
-
-  const directions = [
-    [1, 0], [1, 1], [0, 1], [-1, 1],
-    [-1, 0], [-1, -1], [0, -1], [1, -1],
-  ];
-
-  let pathId = 0;
-
-  for (let startY = 0; startY < height; startY += simplify) {
-    for (let startX = 0; startX < width; startX += simplify) {
-      const startIdx = startY * width + startX;
-      if (!getEdge(startX, startY) || visited[startIdx]) continue;
-
-      const points: { x: number; y: number }[] = [];
-      let cx = startX;
-      let cy = startY;
-      let steps = 0;
-      const maxSteps = 2000;
-
-      while (steps < maxSteps) {
-        const idx = cy * width + cx;
-        if (visited[idx]) break;
-        visited[idx] = 1;
-        points.push({ x: cx, y: cy });
-
-        let found = false;
-        for (const [dx, dy] of directions) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          const nIdx = ny * width + nx;
-          if (getEdge(nx, ny) && !visited[nIdx]) {
-            cx = nx;
-            cy = ny;
-            found = true;
-            break;
-          }
-        }
-        if (!found) break;
-        steps++;
-      }
-
-      if (points.length < 4) continue;
-
-      // 포인트 단순화 (Douglas-Peucker 간소화)
-      const simplified = simplifyPoints(points, 2);
-      if (simplified.length < 2) continue;
-
-      // SVG path 생성
-      const d = pointsToSmoothPath(simplified);
-
-      paths.push({
-        id: `path-${pathId++}`,
-        d,
-        strokeWidth: 1.5,
-        strokeColor: "#000000",
-        opacity: 100,
-        points: simplified,
-      });
-
-      if (paths.length > 300) break;
-    }
-    if (paths.length > 300) break;
-  }
-
-  return paths;
-}
-
-// 포인트 단순화
+// ─── 포인트 단순화 ───
 function simplifyPoints(
   points: { x: number; y: number }[],
   tolerance: number
 ): { x: number; y: number }[] {
   if (points.length <= 2) return points;
-
   const result: { x: number; y: number }[] = [points[0]];
   let lastKept = 0;
-
   for (let i = 1; i < points.length - 1; i++) {
     const dx = points[i].x - points[lastKept].x;
     const dy = points[i].y - points[lastKept].y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist >= tolerance) {
+    if (Math.sqrt(dx * dx + dy * dy) >= tolerance) {
       result.push(points[i]);
       lastKept = i;
     }
   }
-
   result.push(points[points.length - 1]);
   return result;
 }
 
-// 포인트를 부드러운 SVG 경로로 변환
+// ─── 포인트 → 부드러운 SVG 경로 ───
 function pointsToSmoothPath(points: { x: number; y: number }[]): string {
   if (points.length < 2) return "";
-
   let d = `M ${points[0].x} ${points[0].y}`;
-
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const curr = points[i];
-
     if (i === 1) {
       d += ` L ${curr.x} ${curr.y}`;
     } else {
@@ -180,16 +251,13 @@ function pointsToSmoothPath(points: { x: number; y: number }[]): string {
       d += ` Q ${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${curr.x} ${curr.y}`;
     }
   }
-
   return d;
 }
 
-// AI 선 보정 (스무딩)
+// ─── AI 선 보정 (가우시안 스무딩) ───
 function smoothPaths(paths: VectorPath[]): VectorPath[] {
   return paths.map((path) => {
     if (path.points.length < 3) return path;
-
-    // 가우시안 스무딩
     const smoothed = path.points.map((pt, i) => {
       if (i === 0 || i === path.points.length - 1) return pt;
       const prev = path.points[i - 1];
@@ -199,15 +267,20 @@ function smoothPaths(paths: VectorPath[]): VectorPath[] {
         y: Math.round(prev.y * 0.25 + pt.y * 0.5 + next.y * 0.25),
       };
     });
-
-    return {
-      ...path,
-      points: smoothed,
-      d: pointsToSmoothPath(smoothed),
-    };
+    return { ...path, points: smoothed, d: pointsToSmoothPath(smoothed) };
   });
 }
 
+// ─── 이미지에서 Uint8Array 이진 데이터 추출 ───
+function imageDataToBinary(data: Uint8ClampedArray, width: number, height: number): Uint8Array {
+  const binary = new Uint8Array(width * height);
+  for (let i = 0; i < data.length; i += 4) {
+    binary[i / 4] = data[i] < 128 ? 1 : 0; // 0 = 검정(선), 1 = 흰색(배경) → 값 반전해서 1=선
+  }
+  return binary;
+}
+
+// ─── Hook ───
 export function useVectorize() {
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [isSmoothing, setIsSmoothing] = useState(false);
@@ -221,12 +294,12 @@ export function useVectorize() {
     try {
       await new Promise<void>((resolve) => {
         const img = new Image();
-        // blob URL은 same-origin이라 crossOrigin을 설정하면 오히려 로드 실패할 수 있음
         if (!imageUrl.startsWith("blob:")) {
           img.crossOrigin = "anonymous";
         }
         img.onload = () => {
-          const maxSize = 400;
+          // 골격화 품질을 위해 이미지 크기 유지 (최대 800px로 상향)
+          const maxSize = 800;
           const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
           const w = Math.round(img.width * scale);
           const h = Math.round(img.height * scale);
@@ -242,14 +315,17 @@ export function useVectorize() {
           ctx.drawImage(img, 0, 0, w, h);
           const imageData = ctx.getImageData(0, 0, w, h);
 
-          // 전처리: AI 컬러 이미지를 고대비 라인아트로 변환 (색상 노이즈 제거)
-          const lineArtData = preprocessToLineArt(imageData, 140);
+          // Step 1: 컬러 → 고대비 라인아트 (임계값 120)
+          const lineArt = preprocessToLineArt(imageData, 120);
 
-          // Sobel edge detection on the preprocessed binary image
-          const edgeData = applySobelFilter(lineArtData);
+          // Step 2: 라인아트 → 이진 배열 (1=선, 0=배경)
+          const binary = imageDataToBinary(lineArt.data, w, h);
 
-          // 엣지 → SVG 경로 (더 높은 임계값과 간격으로 노이즈 감소)
-          const paths = edgePixelsToSVGPaths(edgeData, w, h, 120, 4);
+          // Step 3: Zhang-Suen 골격화
+          const skeleton = zhangSuenThinning(binary, w, h);
+
+          // Step 4: 골격 → SVG 경로 (엔드포인트/분기점 기반 세그먼트 추적)
+          const paths = traceSkeletonPaths(skeleton, w, h);
 
           setVectorPaths(paths);
           setShowVectorEditor(true);
@@ -304,78 +380,4 @@ export function useVectorize() {
     closeVectorEditor,
     setVectorPaths,
   };
-}
-
-// 데모용 경로 생성 (이미지 로드 실패 시)
-function generateDemoPaths(): VectorPath[] {
-  const paths: VectorPath[] = [];
-
-  // 얼굴 윤곽
-  paths.push({
-    id: "demo-face",
-    d: "M 200 80 Q 260 60 300 100 Q 340 140 330 200 Q 320 260 280 290 Q 240 320 200 310 Q 160 300 140 260 Q 120 220 130 170 Q 140 120 200 80",
-    strokeWidth: 2,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [
-      { x: 200, y: 80 }, { x: 260, y: 60 }, { x: 300, y: 100 },
-      { x: 330, y: 200 }, { x: 280, y: 290 }, { x: 200, y: 310 },
-      { x: 140, y: 260 }, { x: 130, y: 170 }, { x: 200, y: 80 },
-    ],
-  });
-
-  // 눈 (왼쪽)
-  paths.push({
-    id: "demo-eye-l",
-    d: "M 165 160 Q 180 150 195 160 Q 180 175 165 160",
-    strokeWidth: 1.5,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [{ x: 165, y: 160 }, { x: 180, y: 150 }, { x: 195, y: 160 }, { x: 180, y: 175 }],
-  });
-
-  // 눈 (오른쪽)
-  paths.push({
-    id: "demo-eye-r",
-    d: "M 225 160 Q 240 150 255 160 Q 240 175 225 160",
-    strokeWidth: 1.5,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [{ x: 225, y: 160 }, { x: 240, y: 150 }, { x: 255, y: 160 }, { x: 240, y: 175 }],
-  });
-
-  // 코
-  paths.push({
-    id: "demo-nose",
-    d: "M 210 190 Q 205 220 200 230 Q 210 235 220 230 Q 215 220 210 190",
-    strokeWidth: 1.2,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [{ x: 210, y: 190 }, { x: 200, y: 230 }, { x: 220, y: 230 }],
-  });
-
-  // 입
-  paths.push({
-    id: "demo-mouth",
-    d: "M 175 265 Q 200 280 225 265",
-    strokeWidth: 1.5,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [{ x: 175, y: 265 }, { x: 200, y: 280 }, { x: 225, y: 265 }],
-  });
-
-  // 머리카락
-  paths.push({
-    id: "demo-hair",
-    d: "M 140 120 Q 160 60 200 50 Q 240 40 270 70 Q 300 100 290 80 Q 260 30 200 30 Q 140 30 120 90 Q 110 120 140 120",
-    strokeWidth: 2.5,
-    strokeColor: "#000000",
-    opacity: 100,
-    points: [
-      { x: 140, y: 120 }, { x: 200, y: 50 }, { x: 270, y: 70 },
-      { x: 290, y: 80 }, { x: 200, y: 30 }, { x: 120, y: 90 },
-    ],
-  });
-
-  return paths;
 }

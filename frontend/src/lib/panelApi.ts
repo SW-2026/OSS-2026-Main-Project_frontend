@@ -63,6 +63,10 @@ export async function createPanel(episodeId: number): Promise<number> {
   return res.data.data;
 }
 
+export async function deletePanel(panelId: number): Promise<void> {
+  await api.delete(`/api/panels/${panelId}`);
+}
+
 // === Cut editor data — B0 cutover (supabase + PanelHistory 대체) ===
 
 interface CutEditorDataResponse {

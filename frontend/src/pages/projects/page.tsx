@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { listProjects, createProject } from "@/lib/projectApi";
+import { listProjects, createProject, deleteProject } from "@/lib/projectApi";
 
 interface Project {
   id: string;
@@ -20,6 +20,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -90,6 +92,20 @@ export default function ProjectsPage() {
     }
   };
 
+  const handleDeleteProject = async () => {
+    if (!deleteTargetId) return;
+    setIsDeleting(true);
+    try {
+      await deleteProject(Number(deleteTargetId));
+      setProjects((prev) => prev.filter((p) => p.id !== deleteTargetId));
+      setDeleteTargetId(null);
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? "프로젝트 삭제 중 오류가 발생했습니다.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0d0d0d] text-[#ccc]" style={{ fontFamily: "'Inter', 'Noto Sans KR', sans-serif" }}>
       {/* 헤더 */}
@@ -150,15 +166,56 @@ export default function ProjectsPage() {
 
         {/* 프로젝트 그리드 */}
         {!isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map((project) => {
+          <>
+            {/* 삭제 확인 모달 */}
+            {deleteTargetId && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-5 w-80 shadow-2xl">
+                  <p className="text-xs text-[#ccc] font-semibold mb-1">프로젝트 삭제</p>
+                  <p className="text-[11px] text-[#888] mb-4">
+                    <span className="text-orange-400">{projects.find((p) => p.id === deleteTargetId)?.title}</span> 프로젝트를 삭제하시겠습니까? 모든 에피소드와 컷이 함께 삭제되며 복구할 수 없습니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleDeleteProject}
+                      disabled={isDeleting}
+                      className="flex-1 h-8 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50"
+                    >
+                      {isDeleting ? "삭제 중..." : "삭제"}
+                    </button>
+                    <button
+                      onClick={() => setDeleteTargetId(null)}
+                      disabled={isDeleting}
+                      className="flex-1 h-8 bg-[#2a2a2a] hover:bg-[#333] text-[#aaa] text-xs rounded-lg cursor-pointer transition-colors whitespace-nowrap"
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((project) => {
               const status = statusLabels[project.status] ?? { label: project.status, color: "text-[#888]", bg: "bg-[#222]" };
               return (
                 <div
                   key={project.id}
-                  onClick={() => navigate(`/editor?projectId=${project.id}`)}
-                  className="group bg-[#111] border border-[#222] rounded-2xl overflow-hidden hover:border-[#333] transition-all cursor-pointer"
+                  className="group relative bg-[#111] border border-[#222] rounded-2xl overflow-hidden hover:border-[#333] transition-all"
                 >
+                  {/* 삭제 버튼 */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeleteTargetId(project.id); }}
+                    className="absolute top-3 right-3 z-10 w-6 h-6 rounded-full bg-red-500/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:bg-red-600 hover:scale-110"
+                    title="프로젝트 삭제"
+                  >
+                    <i className="ri-close-line text-xs" />
+                  </button>
+
+                  <div
+                    onClick={() => navigate(`/editor?projectId=${project.id}`)}
+                    className="cursor-pointer"
+                  >
                   {/* 썸네일 */}
                   <div className="relative w-full h-40 overflow-hidden">
                     {project.thumbnail_url ? (
@@ -206,10 +263,12 @@ export default function ProjectsPage() {
                       <span className="text-[#444] text-[10px] whitespace-nowrap">{project.lastEdited ? new Date(project.lastEdited).toLocaleDateString("ko-KR") : "-"}</span>
                     </div>
                   </div>
+                  </div>
                 </div>
               );
             })}
-          </div>
+            </div>
+          </>
         )}
 
         {/* 빈 상태 */}

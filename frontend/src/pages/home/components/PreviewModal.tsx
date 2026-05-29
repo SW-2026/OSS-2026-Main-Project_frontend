@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { loadCutExportData, renderCutToDataURL } from "@/lib/cutExportUtils";
 import type { Cut } from "../../../hooks/useEditorState";
 
 interface PreviewModalProps {
@@ -6,6 +7,13 @@ interface PreviewModalProps {
   onClose: () => void;
   cuts: Cut[];
   episodeTitle: string;
+}
+
+interface RenderedCut {
+  cutId: string;
+  dataUrl: string | null;
+  loading: boolean;
+  error: boolean;
 }
 
 export default function PreviewModal({
@@ -18,16 +26,89 @@ export default function PreviewModal({
   const [isPlaying, setIsPlaying] = useState(false);
   const [showInfo, setShowInfo] = useState(true);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [renderedCuts, setRenderedCuts] = useState<Map<string, RenderedCut>>(new Map());
+  const renderInProgress = useRef<Set<string>>(new Set());
 
   const validCuts = cuts.filter((c) => c.isGenerated || c.thumbnail);
 
+  // 초기화
   useEffect(() => {
     if (isOpen) {
       setCurrentIndex(0);
       setIsPlaying(false);
       setShowInfo(true);
+      setRenderedCuts(new Map());
+      renderInProgress.current = new Set();
     }
   }, [isOpen]);
+
+  // 컷 렌더링
+  const renderCut = useCallback(async (cut: Cut) => {
+    const cutId = cut.id;
+    if (renderInProgress.current.has(cutId)) return;
+    if (renderedCuts.has(cutId) && (renderedCuts.get(cutId)!.dataUrl || renderedCuts.get(cutId)!.error)) return;
+
+    renderInProgress.current.add(cutId);
+    setRenderedCuts((prev) => {
+      const next = new Map(prev);
+      next.set(cutId, { cutId, dataUrl: null, loading: true, error: false });
+      return next;
+    });
+
+    try {
+      const data = await loadCutExportData(cutId);
+      if (data && (data.strokes.length > 0 || data.balloons.length > 0 || data.canvasImages.length > 0)) {
+        const dataUrl = await renderCutToDataURL(data, "png", 90, 1);
+        setRenderedCuts((prev) => {
+          const next = new Map(prev);
+          next.set(cutId, { cutId, dataUrl, loading: false, error: false });
+          return next;
+        });
+      } else if (cut.thumbnail) {
+        setRenderedCuts((prev) => {
+          const next = new Map(prev);
+          next.set(cutId, { cutId, dataUrl: cut.thumbnail, loading: false, error: false });
+          return next;
+        });
+      } else {
+        setRenderedCuts((prev) => {
+          const next = new Map(prev);
+          next.set(cutId, { cutId, dataUrl: null, loading: false, error: true });
+          return next;
+        });
+      }
+    } catch {
+      if (cut.thumbnail) {
+        setRenderedCuts((prev) => {
+          const next = new Map(prev);
+          next.set(cutId, { cutId, dataUrl: cut.thumbnail, loading: false, error: false });
+          return next;
+        });
+      } else {
+        setRenderedCuts((prev) => {
+          const next = new Map(prev);
+          next.set(cutId, { cutId, dataUrl: null, loading: false, error: true });
+          return next;
+        });
+      }
+    } finally {
+      renderInProgress.current.delete(cutId);
+    }
+  }, [renderedCuts]);
+
+  // 현재 컷 + 다음 컷 미리 렌더링
+  useEffect(() => {
+    if (!isOpen || validCuts.length === 0) return;
+    const toRender = [
+      currentIndex,
+      (currentIndex + 1) % validCuts.length,
+      (currentIndex + 2) % validCuts.length,
+    ].filter((idx, i, arr) => arr.indexOf(idx) === i);
+
+    toRender.forEach((idx) => {
+      renderCut(validCuts[idx]);
+    });
+  }, [isOpen, currentIndex, validCuts, renderCut]);
 
   // 자동 재생
   useEffect(() => {
@@ -73,6 +154,9 @@ export default function PreviewModal({
   if (!isOpen || validCuts.length === 0) return null;
 
   const current = validCuts[currentIndex];
+  const currentRendered = renderedCuts.get(current.id);
+  const isLoading = !currentRendered || currentRendered.loading;
+  const displayUrl = currentRendered?.dataUrl ?? current.thumbnail ?? null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={onClose}>
@@ -102,9 +186,14 @@ export default function PreviewModal({
         className="relative max-w-[90vw] max-h-[80vh] rounded-xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {current.thumbnail ? (
+        {isLoading ? (
+          <div className="w-[600px] h-[400px] bg-[#111] flex flex-col items-center justify-center gap-3">
+            <div className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+            <span className="text-[#555] text-xs">컷 렌더링 중...</span>
+          </div>
+        ) : displayUrl ? (
           <img
-            src={current.thumbnail}
+            src={displayUrl}
             alt={current.label}
             className="max-w-[90vw] max-h-[80vh] object-contain bg-[#111]"
             draggable={false}
@@ -153,23 +242,31 @@ export default function PreviewModal({
 
         {/* 썸네일 스트립 */}
         <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-3 py-1.5">
-          {validCuts.map((cut, idx) => (
-            <button
-              key={cut.id}
-              onClick={() => { setCurrentIndex(idx); setIsPlaying(false); }}
-              className={`w-8 h-10 rounded overflow-hidden border transition-all cursor-pointer ${
-                idx === currentIndex
-                  ? "border-orange-500 ring-1 ring-orange-500"
-                  : "border-transparent opacity-50 hover:opacity-80"
-              }`}
-            >
-              {cut.thumbnail ? (
-                <img src={cut.thumbnail} alt="" className="w-full h-full object-cover" draggable={false} />
-              ) : (
-                <div className="w-full h-full bg-[#222]" />
-              )}
-            </button>
-          ))}
+          {validCuts.map((cut, idx) => {
+            const rendered = renderedCuts.get(cut.id);
+            const thumbUrl = rendered?.dataUrl ?? cut.thumbnail ?? null;
+            return (
+              <button
+                key={cut.id}
+                onClick={() => { setCurrentIndex(idx); setIsPlaying(false); }}
+                className={`w-8 h-10 rounded overflow-hidden border transition-all cursor-pointer ${
+                  idx === currentIndex
+                    ? "border-orange-500 ring-1 ring-orange-500"
+                    : "border-transparent opacity-50 hover:opacity-80"
+                }`}
+              >
+                {thumbUrl ? (
+                  <img src={thumbUrl} alt="" className="w-full h-full object-cover" draggable={false} />
+                ) : rendered?.loading ? (
+                  <div className="w-full h-full bg-[#1a1a1a] flex items-center justify-center">
+                    <div className="w-3 h-3 border border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <div className="w-full h-full bg-[#222]" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <button

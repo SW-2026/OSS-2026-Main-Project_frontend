@@ -6,14 +6,12 @@ import {
   updateEpisode,
   deleteEpisode as apiDeleteEpisode,
 } from "@/lib/episodeApi";
-import { listPanels, createPanel, saveCutEditorData, getCutEditorData } from "@/lib/panelApi";
+import { listPanels, createPanel, deletePanel as apiDeletePanel, saveCutEditorData, getCutEditorData } from "@/lib/panelApi";
 import api from "@/lib/api";
 import type { BalloonItem, BalloonShape } from "@/pages/home/components/BalloonPanel";
-import type { AIGeneratedImage } from "@/pages/home/components/AIImagePanel";
+import type { AIGeneratedImage } from "@/pages/home/components/ImagePanel";
 
-const BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "http://localhost:8080";
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8080";
 
 // backend가 finalImageUrl 등을 "/images/..." 상대경로로 저장 → 절대 URL로 변환해서 frontend에 노출
 const toAbsoluteImageUrl = (path: string | null | undefined): string =>
@@ -39,6 +37,12 @@ export interface Layer {
   opacity: number;
   blendMode: string;
   imageUrl?: string;
+  // 캐릭터/배경 이미지의 캔버스 내 위치와 크기
+  imgX?: number;
+  imgY?: number;
+  imgW?: number;
+  imgH?: number;
+  imgRotation?: number;
 }
 
 const defaultLayers: Layer[] = [
@@ -78,6 +82,7 @@ export interface Stroke {
   color: string;
   size: number;
   opacity: number;
+  hardness: number;
   episodeId: string;
   cutId: string;
   layerId?: string;
@@ -177,6 +182,8 @@ export function useEditorState(initialProjectId?: string | null) {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(initialProjectId ?? null);
 
   const [layers, setLayers] = useState<Layer[]>(defaultLayers);
+  const layersRef = useRef(layers);
+  useEffect(() => { layersRef.current = layers; }, [layers]);
   const [selectedLayerId, setSelectedLayerId] = useState<string>("layer-lineart");
   const selectedLayerIdRef = useRef(selectedLayerId);
   useEffect(() => { selectedLayerIdRef.current = selectedLayerId; }, [selectedLayerId]);
@@ -195,11 +202,14 @@ export function useEditorState(initialProjectId?: string | null) {
 
   const [zoom, setZoom] = useState(75);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
+  const savingRef = useRef(false);
+  useEffect(() => { savingRef.current = saveStatus === "saving"; }, [saveStatus]);
 
   // Drawing state
   const [activeTool, setActiveTool] = useState<DrawingTool>("brush");
   const [brushSize, setBrushSize] = useState(8);
   const [brushOpacity, setBrushOpacity] = useState(100);
+  const [brushHardness, setBrushHardness] = useState(80);
   const [foregroundColor, setForegroundColor] = useState("#000000");
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
 
@@ -207,10 +217,14 @@ export function useEditorState(initialProjectId?: string | null) {
   const [promptText, setPromptText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<AIGeneratedImage[]>([]);
-  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number }[]>([]);
+  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number; layerPosition?: number }[]>([]);
+  const canvasImagesRef = useRef(canvasImages);
+  useEffect(() => { canvasImagesRef.current = canvasImages; }, [canvasImages]);
 
   // Balloon state
   const [balloons, setBalloons] = useState<BalloonItem[]>([]);
+  const balloonsRef = useRef(balloons);
+  useEffect(() => { balloonsRef.current = balloons; }, [balloons]);
   const [selectedBalloonId, setSelectedBalloonId] = useState<string | null>(null);
   const [balloonShape, setBalloonShape] = useState<BalloonShape>("round");
   const [balloonFontSize, setBalloonFontSize] = useState(16);
@@ -354,7 +368,7 @@ export function useEditorState(initialProjectId?: string | null) {
 
   // 컷 데이터 로드 — cutEditorData API → localStorage fallback (B0 cutover)
   const loadCutData = async (cutId: string) => {
-    if (!cutId) return;
+    if (!cutId || savingRef.current) return;
     try {
       let data: any = null;
 
@@ -370,13 +384,9 @@ export function useEditorState(initialProjectId?: string | null) {
           console.error("[loadCutData] cutEditorData API 로드 실패 → localStorage fallback:", apiErr);
         }
       }
-      if (!data) {
-        data = loadCutDataFromLocal(cutId);
-      }
 
       if (!data) {
         // cut-data 없음 → defaultLayers 리셋 + cut의 character/background Asset URL을 Layer.imageUrl로 매핑
-        // (canvasImages 경로 아님 — Layer 경로 정책)
         const cut = cutsRef.current.find((c) => c.id === cutId);
         if (cut) {
           const baseLayers: Layer[] = defaultLayers.map((l) =>
@@ -384,7 +394,6 @@ export function useEditorState(initialProjectId?: string | null) {
               ? { ...l, imageUrl: cut.backgroundAssetUrl }
               : { ...l }
           );
-          // defaultLayers엔 character 없음 — Asset URL 있을 때만 신규 push
           if (cut.characterAssetUrl) {
             baseLayers.push({
               id: `layer-character-${cut.id}`,
@@ -410,7 +419,9 @@ export function useEditorState(initialProjectId?: string | null) {
         });
       }
       if (data.balloons) {
-        setBalloons(Array.isArray(data.balloons) ? data.balloons : []);
+        const loaded = Array.isArray(data.balloons) ? data.balloons : [];
+        // 하위 호환: layerId 없는 구버전 말풍선은 기본 대사 레이어에 할당
+        setBalloons(loaded.map((b: BalloonItem) => b.layerId ? b : { ...b, layerId: "layer-dialogue" }));
       }
       if (data.canvas_images) {
         setCanvasImages(Array.isArray(data.canvas_images) ? data.canvas_images : []);
@@ -433,17 +444,25 @@ export function useEditorState(initialProjectId?: string | null) {
 
   // 컷 변경 시 레이어 imageUrl을 패널 데이터에서 동기화
   useEffect(() => {
-    if (!activeCutId) return;
+    if (!activeCutId || savingRef.current) return;
     const cut = cuts.find((c) => c.id === activeCutId);
     if (!cut) return;
 
     setLayers((prev) => prev.map((l) => {
-      if (l.type === "background") {
+      if (l.type === "background" && cut.backgroundAssetUrl) {
         const url = resolveImageUrl(cut.backgroundAssetUrl);
+        const needsDefault = l.imgX == null || l.imgY == null;
+        if (needsDefault && url) {
+          return { ...l, imageUrl: url, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 };
+        }
         return { ...l, imageUrl: url ?? undefined };
       }
-      if (l.type === "character") {
+      if (l.type === "character" && cut.characterAssetUrl) {
         const url = resolveImageUrl(cut.characterAssetUrl);
+        const needsDefault = l.imgX == null || l.imgY == null;
+        if (needsDefault && url) {
+          return { ...l, imageUrl: url, imgX: 160, imgY: 210, imgW: 480, imgH: 680 };
+        }
         return { ...l, imageUrl: url ?? undefined };
       }
       return l;
@@ -452,8 +471,25 @@ export function useEditorState(initialProjectId?: string | null) {
 
   const addBalloon = useCallback((x: number, y: number): string => {
     const id = `balloon-${Date.now()}`;
+
+    // 현재 선택된 레이어가 dialogue 타입이면 그 레이어에 연결,
+    // 아니면 첫 번째 dialogue 타입 레이어 찾아서 연결
+    let layerId = "layer-dialogue";
+    const currentLayers = layersRef.current;
+    const selId = selectedLayerIdRef.current;
+    const selLayer = currentLayers.find((l) => l.id === selId);
+    if (selLayer && selLayer.type === "dialogue") {
+      layerId = selLayer.id;
+    } else {
+      const dialogueLayer = currentLayers.find((l) => l.type === "dialogue");
+      if (dialogueLayer) {
+        layerId = dialogueLayer.id;
+      }
+    }
+
     const newBalloon: BalloonItem = {
       id,
+      layerId,
       shape: balloonShape,
       x,
       y,
@@ -519,6 +555,11 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("unsaved");
   }, []);
 
+  const updateLayerImage = useCallback((layerId: string, x: number, y: number, w: number, h: number, rotation?: number) => {
+    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, imgX: x, imgY: y, imgW: w, imgH: h, ...(rotation !== undefined ? { imgRotation: rotation } : {}) } : l)));
+    setSaveStatus("unsaved");
+  }, []);
+
   const addLayer = useCallback((type: LayerType, name: string) => {
     const newLayer: Layer = {
       id: `layer-${Date.now()}`,
@@ -535,7 +576,22 @@ export function useEditorState(initialProjectId?: string | null) {
   }, []);
 
   const deleteLayer = useCallback((id: string) => {
-    setLayers((prev) => prev.filter((l) => l.id !== id));
+    setLayers((prev) => {
+      const filtered = prev.filter((l) => l.id !== id);
+      // 삭제한 레이어가 선택된 레이어였으면 첫 번째 레이어로 선택 변경
+      if (selectedLayerIdRef.current === id && filtered.length > 0) {
+        setSelectedLayerId(filtered[0].id);
+      }
+      return filtered;
+    });
+    // 삭제된 레이어에 소속된 말풍선 제거
+    setBalloons((prev) => prev.filter((b) => b.layerId !== id));
+    if (selectedBalloonId) {
+      const deletedBalloon = balloonsRef.current.find((b) => b.id === selectedBalloonId);
+      if (deletedBalloon && deletedBalloon.layerId === id) {
+        setSelectedBalloonId(null);
+      }
+    }
     setSaveStatus("unsaved");
   }, []);
 
@@ -652,7 +708,15 @@ export function useEditorState(initialProjectId?: string | null) {
   const handleApplyImageToCanvas = useCallback((img: AIGeneratedImage) => {
     setCanvasImages((prev) => [
       ...prev,
-      { id: `cimg-${Date.now()}`, url: img.url, x: 50, y: 50, w: 400, h: 400 },
+      { id: `cimg-${Date.now()}`, url: img.url, x: 50, y: 50, w: 400, h: 400, layerPosition: layers.length },
+    ]);
+    setSaveStatus("unsaved");
+  }, [layers.length]);
+
+  const addCanvasImage = useCallback((url: string, x: number, y: number, w: number, h: number) => {
+    setCanvasImages((prev) => [
+      ...prev,
+      { id: `cimg-${Date.now()}`, url, x, y, w, h, layerPosition: layersRef.current.length },
     ]);
     setSaveStatus("unsaved");
   }, []);
@@ -667,27 +731,44 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("unsaved");
   }, []);
 
-  // 저장: cutEditorData API로 저장 (B0 cutover). 데모 cut(`cut-...`) 또는 API fail 시 localStorage fallback
+  const updateCanvasImageLayerPosition = useCallback((id: string, direction: "up" | "down") => {
+    setCanvasImages((prev) => {
+      const idx = prev.findIndex((img) => img.id === id);
+      if (idx === -1) return prev;
+      const current = prev[idx].layerPosition ?? layers.length;
+      const newPos = direction === "up" ? Math.max(0, current - 1) : Math.min(layers.length, current + 1);
+      if (newPos === current) return prev;
+      return prev.map((img) => img.id === id ? { ...img, layerPosition: newPos } : img);
+    });
+    setSaveStatus("unsaved");
+  }, [layers.length]);
+
+  // 저장: 현재 컷 데이터를 history 도메인 API로 저장 (fallback: Supabase / localStorage)
   const handleSave = useCallback(async () => {
-    if (!activeCutId) {
+    const cutId = activeCutIdRef.current;
+    if (!cutId) {
       setSaveStatus("saved");
       return;
     }
     setSaveStatus("saving");
 
     try {
-      const cutStrokes = allStrokes.filter((s) => s.cutId === activeCutId);
+      const cutStrokes = allStrokesRef.current.filter((s) => s.cutId === cutId);
+      const currentBalloons = balloonsRef.current;
+      const currentCanvasImages = canvasImagesRef.current;
+      const currentLayers = layersRef.current;
       const payload = {
-        cut_id: activeCutId,
+        cut_id: cutId,
         strokes: cutStrokes,
-        balloons,
-        canvas_images: canvasImages,
-        layers,
+        balloons: currentBalloons,
+        canvas_images: currentCanvasImages,
+        layers: currentLayers,
       };
 
       const panelId = Number(activeCutId);
       if (!Number.isNaN(panelId)) {
         try {
+          // cutEditorData API로 저장 (B0 cutover)
           await saveCutEditorData(panelId, JSON.stringify(payload));
         } catch (apiErr) {
           // eslint-disable-next-line no-console
@@ -705,7 +786,7 @@ export function useEditorState(initialProjectId?: string | null) {
       console.error("[useEditorState] 저장 실패:", err);
       setSaveStatus("unsaved");
     }
-  }, [activeCutId, allStrokes, balloons, canvasImages, layers]);
+  }, []);
 
   // 자동 저장: unsaved 상태가 되면 3초 후 자동 저장
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -777,6 +858,7 @@ export function useEditorState(initialProjectId?: string | null) {
       episodeId: activeEpisodeIdRef.current,
       cutId: activeCutIdRef.current,
       layerId: selectedLayerIdRef.current,
+      hardness: stroke.hardness ?? 100,
       bbox: { x: minX - stroke.size, y: minY - stroke.size, w: maxX - minX + stroke.size * 2, h: maxY - minY + stroke.size * 2 },
     };
     pushHistory(allStrokesRef.current);
@@ -947,6 +1029,56 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("saved");
   }, []);
 
+  const deleteCut = useCallback(async (cutId: string) => {
+    const currentEpId = activeEpisodeIdRef.current;
+    const currentCuts = cutsRef.current.filter((c) => c.episodeId === currentEpId);
+
+    // 같은 에피소드에 컷이 1개뿐이면 삭제 불가
+    if (currentCuts.length <= 1) return;
+
+    // backend Panel DELETE
+    try {
+      if (isValidUUID(cutId)) {
+        await apiDeletePanel(Number(cutId));
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[useEditorState] 컷 삭제 실패:", err);
+      return;
+    }
+
+    // Supabase cut_data 정리
+    try {
+      await supabase.from("cut_data").delete().eq("cut_id", cutId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[useEditorState] cut_data 삭제 실패:", err);
+    }
+
+    const wasActive = activeCutIdRef.current === cutId;
+    setCuts((prev) => {
+      const filtered = prev.filter((c) => c.id !== cutId);
+      if (wasActive) {
+        const remaining = filtered.filter((c) => c.episodeId === currentEpId)
+          .sort((a, b) => a.index - b.index);
+        if (remaining.length > 0) {
+          setActiveCutId(remaining[0].id);
+          // 라벨 재정렬
+          const reindexed = filtered.map((c, i) =>
+            c.episodeId === currentEpId ? { ...c, index: i + 1, label: `컷 ${i + 1}` } : c
+          );
+          return reindexed;
+        }
+      }
+      return filtered;
+    });
+    setBalloons([]);
+    setSelectedBalloonId(null);
+    setCanvasImages([]);
+    setSelectedStrokeIds([]);
+    setSaveStatus("saved");
+  }, []);
+
   const deleteEpisode = useCallback(async (id: string) => {
     // backend Episode DELETE — panels만 cascade. Supabase cuts/cut_data는 잔존 (1-C-3에서 정리)
     try {
@@ -1072,6 +1204,7 @@ export function useEditorState(initialProjectId?: string | null) {
     toggleLayerLocked,
     updateLayerOpacity,
     updateLayerBlendMode,
+    updateLayerImage,
     addLayer,
     deleteLayer,
     reorderLayers,
@@ -1089,6 +1222,7 @@ export function useEditorState(initialProjectId?: string | null) {
     renameEpisode,
     deleteEpisode,
     addCut,
+    deleteCut,
     // zoom
     zoom,
     zoomIn,
@@ -1104,6 +1238,8 @@ export function useEditorState(initialProjectId?: string | null) {
     setBrushSize,
     brushOpacity,
     setBrushOpacity,
+    brushHardness,
+    setBrushHardness,
     foregroundColor,
     setForegroundColor,
     backgroundColor,
@@ -1118,8 +1254,10 @@ export function useEditorState(initialProjectId?: string | null) {
     canvasImages,
     handleUploadImage,
     handleApplyImageToCanvas,
+    addCanvasImage,
     updateCanvasImage,
     deleteCanvasImage,
+    updateCanvasImageLayerPosition,
     // balloons
     balloons,
     selectedBalloonId,

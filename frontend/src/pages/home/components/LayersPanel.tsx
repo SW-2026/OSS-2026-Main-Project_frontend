@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   DndContext,
   closestCenter,
@@ -14,6 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import type { Layer, LayerType } from "@/hooks/useEditorState";
+import type { BalloonItem } from "./BalloonPanel";
 import SortableLayerItem from "./SortableLayerItem";
 
 interface LayersPanelProps {
@@ -27,6 +28,7 @@ interface LayersPanelProps {
   onAddLayer: (type: LayerType, name: string) => void;
   onDeleteLayer: (id: string) => void;
   onReorderLayers: (orderedIds: string[]) => void;
+  balloons?: BalloonItem[];
 }
 
 const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft-light", "hard-light", "color-dodge", "color-burn", "darken", "lighten", "difference", "exclusion"];
@@ -42,12 +44,23 @@ export default function LayersPanel({
   onAddLayer,
   onDeleteLayer,
   onReorderLayers,
+  balloons,
 }: LayersPanelProps) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   // 사용자 보기: 맨 위가 z-index 가장 높음 → layers를 reverse해서 표시
   const reversedLayers = [...layers].reverse();
   const selectedLayer = layers.find((l) => l.id === selectedLayerId);
+
+  // 레이어별 말풍선 개수 집계
+  const balloonCounts = useMemo(() => {
+    if (!balloons || balloons.length === 0) return {} as Record<string, number>;
+    const counts: Record<string, number> = {};
+    balloons.forEach((b) => {
+      counts[b.layerId] = (counts[b.layerId] || 0) + 1;
+    });
+    return counts;
+  }, [balloons]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -142,6 +155,7 @@ export default function LayersPanel({
                 onSelect={() => onSelectLayer(layer.id)}
                 onToggleVisible={() => onToggleVisible(layer.id)}
                 onToggleLocked={() => onToggleLocked(layer.id)}
+                balloonCount={balloonCounts[layer.id] ?? 0}
               />
             ))}
           </SortableContext>
@@ -170,6 +184,23 @@ export default function LayersPanel({
                 background: `linear-gradient(to right, #f97316 ${selectedLayer.opacity}%, #2a2a2a ${selectedLayer.opacity}%)`,
               }}
             />
+          </div>
+
+          {/* 블렌드 모드 */}
+          <div className="mb-2.5">
+            <span className="text-[10px] text-[#888] block mb-1">블렌드 모드</span>
+            <select
+              value={selectedLayer.blendMode}
+              onChange={(e) => onUpdateBlendMode(selectedLayer.id, e.target.value)}
+              className="w-full h-7 bg-[#1a1a1a] border border-[#2a2a2a] rounded-md text-[10px] text-[#ccc] px-2 cursor-pointer outline-none focus:border-orange-500/50 transition-colors appearance-none"
+              style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23555'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center", paddingRight: "22px" }}
+            >
+              {BLEND_MODES.map((mode) => (
+                <option key={mode} value={mode} className="bg-[#1a1a1a] text-[#ccc]">
+                  {mode}
+                </option>
+              ))}
+            </select>
           </div>
 
 

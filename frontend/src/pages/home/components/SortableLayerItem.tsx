@@ -18,6 +18,7 @@ interface SortableLayerItemProps {
   onSelect: () => void;
   onToggleVisible: () => void;
   onToggleLocked: () => void;
+  balloonCount?: number;
 }
 
 export default function SortableLayerItem({
@@ -26,6 +27,7 @@ export default function SortableLayerItem({
   onSelect,
   onToggleVisible,
   onToggleLocked,
+  balloonCount = 0,
 }: SortableLayerItemProps) {
   const {
     attributes,
@@ -74,9 +76,16 @@ export default function SortableLayerItem({
 
       {/* 레이어 이름 */}
       <div className="flex-1 min-w-0">
-        <p className={`text-[11px] font-medium truncate ${isSelected ? "text-[#eee]" : "text-[#999]"}`}>
-          {layer.name}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className={`text-[11px] font-medium truncate ${isSelected ? "text-[#eee]" : "text-[#999]"}`}>
+            {layer.name}
+          </p>
+          {layer.type === "dialogue" && balloonCount > 0 && (
+            <span className="shrink-0 text-[8px] bg-pink-500/20 text-pink-400 px-1 py-0.5 rounded-full font-medium leading-none">
+              {balloonCount}
+            </span>
+          )}
+        </div>
         <p className="text-[8px] text-[#555]">{layer.opacity}% · {layer.blendMode}</p>
       </div>
 

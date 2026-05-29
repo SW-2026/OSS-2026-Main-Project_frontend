@@ -13,12 +13,14 @@ interface CanvasImageLayer {
   y: number;
   w: number;
   h: number;
+  layerPosition?: number;
 }
 
 interface DrawingCanvasProps {
   activeTool: DrawingTool;
   brushSize: number;
   opacity: number;
+  hardness: number;
   foregroundColor: string;
   zoom: number;
   onZoomIn: () => void;
@@ -27,6 +29,7 @@ interface DrawingCanvasProps {
   canvasImages?: CanvasImageLayer[];
   onUpdateCanvasImage?: (id: string, x: number, y: number, w: number, h: number) => void;
   onDeleteCanvasImage?: (id: string) => void;
+  onUpdateCanvasImageLayerPosition?: (id: string, direction: "up" | "down") => void;
   // stroke props
   strokes: Stroke[];
   selectedStrokeIds: string[];
@@ -48,6 +51,12 @@ interface DrawingCanvasProps {
   // layer props
   layers?: Layer[];
   selectedLayerId?: string;
+  onUpdateLayerImage?: (layerId: string, x: number, y: number, w: number, h: number, rotation?: number) => void;
+  rulerVisible?: boolean;
+  gridVisible?: boolean;
+  guideVisible?: boolean;
+  onToggleRuler?: () => void;
+  onToggleGrid?: () => void;
 }
 
 export interface DrawingCanvasHandle {
@@ -57,6 +66,15 @@ export interface DrawingCanvasHandle {
 
 const CANVAS_W = 800;
 const CANVAS_H = 1100;
+
+// 캔버스 경계 안으로 위치 제한 (최소 50px 이상 보이도록)
+function clampToCanvas(x: number, y: number, w: number, h: number): { x: number; y: number } {
+  const minVisible = 50;
+  return {
+    x: Math.max(-w + minVisible, Math.min(CANVAS_W - minVisible, x)),
+    y: Math.max(-h + minVisible, Math.min(CANVAS_H - minVisible, y)),
+  };
+}
 
 // 두 점 사이 거리
 function dist(a: StrokePoint, b: StrokePoint) {
@@ -83,7 +101,11 @@ function isPointOnStroke(p: StrokePoint, stroke: Stroke, threshold: number): boo
   return false;
 }
 
-// 스트로크를 캔버스에 렌더링 (레이어 속성 적용)
+// 스트로크를 캔버스에 렌더링 (레이어 속성 + 경도 blur 적용)
+function getBlurFromHardness(hardness: number): number {
+  return Math.max(0, (100 - hardness) * 0.08);
+}
+
 function renderStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,
@@ -120,6 +142,12 @@ function renderStroke(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
+  // 경도에 따른 blur 필터 적용
+  const blurAmount = getBlurFromHardness(stroke.hardness ?? 100);
+  if (blurAmount > 0.1) {
+    ctx.filter = `blur(${blurAmount}px)`;
+  }
+
   if (highlight) {
     ctx.strokeStyle = "#f97316";
     ctx.lineWidth = stroke.size + 4;
@@ -150,21 +178,8 @@ function renderStroke(
     ctx.globalCompositeOperation = "destination-out";
     ctx.strokeStyle = "rgba(0,0,0,1)";
     ctx.lineWidth = stroke.size;
-  } else if (stroke.tool === "pen") {
-    ctx.globalCompositeOperation = layerBlendMode === "normal" ? "source-over" : layerBlendMode;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.size * 0.6;
-  } else if (stroke.tool === "pencil") {
-    ctx.globalCompositeOperation = layerBlendMode === "normal" ? "source-over" : layerBlendMode;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.size * 0.4;
-    ctx.globalAlpha = finalAlpha * 0.7;
-  } else if (stroke.tool === "marker") {
-    ctx.globalCompositeOperation = layerBlendMode === "normal" ? "source-over" : layerBlendMode;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.size * 2;
-    ctx.globalAlpha = finalAlpha * 0.5;
   } else {
+    // 모든 드로잉 툴 - 동일한 크기, 경도로만 차별화
     ctx.globalCompositeOperation = layerBlendMode === "normal" ? "source-over" : layerBlendMode;
     ctx.strokeStyle = stroke.color;
     ctx.lineWidth = stroke.size;
@@ -201,6 +216,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       activeTool,
       brushSize,
       opacity,
+      hardness,
       foregroundColor,
       zoom,
       onZoomIn,
@@ -209,6 +225,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       canvasImages = [],
       onUpdateCanvasImage,
       onDeleteCanvasImage,
+      onUpdateCanvasImageLayerPosition,
       strokes,
       selectedStrokeIds,
       onAddStroke,
@@ -228,6 +245,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       // layer props
       layers = [],
       selectedLayerId,
+      onUpdateLayerImage,
+      rulerVisible,
+      gridVisible,
+      guideVisible,
+      onToggleRuler,
+      onToggleGrid,
     },
     ref
   ) {
@@ -241,6 +264,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const [showGrid, setShowGrid] = useState(false);
     const [showRuler, setShowRuler] = useState(true);
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+
+    // 핀치 줌 상태
+    const pinchRef = useRef<{ initialDist: number; lastZoom: number } | null>(null);
+    const [isPinching, setIsPinching] = useState(false);
+
+    // 외부 제어 prop이 있으면 그걸 사용
+    const effectiveShowRuler = rulerVisible !== undefined ? rulerVisible : showRuler;
+    const effectiveShowGrid = gridVisible !== undefined ? gridVisible : showGrid;
+
     const isPanning = useRef(false);
     const panStart = useRef<StrokePoint | null>(null);
 
@@ -250,6 +282,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const imgResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number } | null>(null);
     const [isDraggingImg, setIsDraggingImg] = useState(false);
     const [isResizingImg, setIsResizingImg] = useState(false);
+
+    // 캐릭터/배경 레이어 이미지 선택/드래그/리사이즈 상태
+    const [selectedLayerImgIds, setSelectedLayerImgIds] = useState<string[]>([]);
+    const layerImgDragRef = useRef<{ startX: number; startY: number; origPositions: { id: string; x: number; y: number }[] } | null>(null);
+    const layerImgResizeRef = useRef<{ startX: number; startY: number; origData: { id: string; x: number; y: number; w: number; h: number; aspectRatio: number }[] } | null>(null);
+    const layerImgRotateRef = useRef<{ startX: number; startY: number; origAngles: { id: string; rotation: number }[]; centerX: number; centerY: number } | null>(null);
+    const [isDraggingLayerImg, setIsDraggingLayerImg] = useState(false);
+    const [isResizingLayerImg, setIsResizingLayerImg] = useState(false);
+    const [isRotatingLayerImg, setIsRotatingLayerImg] = useState(false);
 
     // 스트로크 선택/이동 상태
     const strokeMoveRef = useRef<{
@@ -298,17 +339,44 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             img.onload = () => {
               ctx.save();
               ctx.globalAlpha = layer.opacity / 100;
-              ctx.drawImage(img, 0, 0, CANVAS_W, CANVAS_H);
+              if (layer.imgX !== undefined && layer.imgY !== undefined && layer.imgW !== undefined && layer.imgH !== undefined) {
+                ctx.drawImage(img, layer.imgX, layer.imgY, layer.imgW, layer.imgH);
+              } else if (layer.type === "background") {
+                ctx.drawImage(img, 0, 0, CANVAS_W, CANVAS_H);
+              } else {
+                ctx.drawImage(img, 160, 210, 480, 680);
+              }
               ctx.restore();
               resolve();
             };
             img.onerror = () => resolve();
             img.src = layer.imageUrl!;
           });
+
+          // 해당 레이어 위치에 들어가야 할 AI 이미지들 렌더링
+          const layerIdx = layers.findIndex((l) => l.id === layer.id);
+          const imagesAtThisLevel = canvasImages.filter(
+            (ci) => (ci.layerPosition ?? layers.length) === layerIdx
+          );
+          for (const cimg of imagesAtThisLevel) {
+            await new Promise<void>((resolve) => {
+              const el = new Image();
+              el.crossOrigin = "anonymous";
+              el.onload = () => {
+                ctx.drawImage(el, cimg.x, cimg.y, cimg.w, cimg.h);
+                resolve();
+              };
+              el.onerror = () => resolve();
+              el.src = cimg.url;
+            });
+          }
         }
 
-        // 2. 이미지 레이어들 (canvasImages)
-        const imagePromises = canvasImages.map(
+        // 2. 나머지 AI 이미지들 (layerPosition >= layers.length 인 것들)
+        const remainingImages = canvasImages.filter(
+          (ci) => (ci.layerPosition ?? layers.length) >= layers.length
+        );
+        const imagePromises = remainingImages.map(
           (img) =>
             new Promise<void>((resolve) => {
               const el = new Image();
@@ -326,10 +394,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         // 3. 스트로크 캔버스
         ctx.drawImage(strokeCanvas, 0, 0);
 
-        // 4. 말풍선 SVG를 캔버스에 합성
+        // 4. 말풍선 SVG를 캔버스에 합성 (숨겨진 레이어 제외)
         if (balloons && balloons.length > 0) {
+          const visibleLayerIds2 = new Set(layers.filter(l => l.visible).map(l => l.id));
+          const exportBalloons = balloons.filter(b => visibleLayerIds2.has(b.layerId));
+          if (exportBalloons.length > 0) {
           const tailPad = 18;
-          const svgContent = balloons
+          const svgContent = exportBalloons
             .map((b) => {
               const tailSize = b.tailDir === "none" ? 0 : tailPad;
               const r = Math.min(16, b.width * 0.15, b.height * 0.25);
@@ -389,6 +460,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             img.onerror = () => { URL.revokeObjectURL(url); resolve(); };
             img.src = url;
           });
+          }
         }
 
         return composite;
@@ -470,6 +542,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     const handleMouseDown = useCallback(
       (e: React.MouseEvent | React.PointerEvent) => {
+        if (isPinching) return;
         if (activeTool === "balloon") return;
         if (activeTool === "hand") {
           isPanning.current = true;
@@ -589,12 +662,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       [
         activeTool, foregroundColor, getCanvasPoint, onZoomIn, onZoomOut, onAddStroke,
         opacity, panOffset, findStrokeAtPoint, selectedStrokeIds,
-        onSelectStrokeIds, onDeleteStrokes,
+        onSelectStrokeIds, onDeleteStrokes, isPinching,
       ]
     );
 
     const handleMouseMove = useCallback(
       (e: React.MouseEvent | React.PointerEvent) => {
+        if (isPinching) return;
         const pt = getCanvasPoint(e);
         setCursorPos(pt);
 
@@ -683,24 +757,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           ctx.lineCap = "round";
           ctx.lineJoin = "round";
 
+          // 경도에 따른 blur 필터
+          const blurAmount = getBlurFromHardness(hardness);
+          if (blurAmount > 0.1) {
+            ctx.filter = `blur(${blurAmount}px)`;
+          }
+
           if (activeTool === "eraser") {
             ctx.globalCompositeOperation = "destination-out";
             ctx.strokeStyle = "rgba(0,0,0,1)";
             ctx.lineWidth = brushSize;
-          } else if (activeTool === "pen") {
-            ctx.globalCompositeOperation = "source-over";
-            ctx.strokeStyle = foregroundColor;
-            ctx.lineWidth = brushSize * 0.6;
-          } else if (activeTool === "pencil") {
-            ctx.globalCompositeOperation = "source-over";
-            ctx.strokeStyle = foregroundColor;
-            ctx.lineWidth = brushSize * 0.4;
-            ctx.globalAlpha = (opacity / 100) * 0.7;
-          } else if (activeTool === "marker") {
-            ctx.globalCompositeOperation = "source-over";
-            ctx.strokeStyle = foregroundColor;
-            ctx.lineWidth = brushSize * 2;
-            ctx.globalAlpha = (opacity / 100) * 0.5;
           } else {
             ctx.globalCompositeOperation = "source-over";
             ctx.strokeStyle = foregroundColor;
@@ -718,9 +784,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         lastPoint.current = pt;
       },
       [
-        activeTool, brushSize, foregroundColor, getCanvasPoint, opacity,
+        activeTool, brushSize, foregroundColor, getCanvasPoint, opacity, hardness,
         isMovingStrokes, selectedStrokeIds, onMoveStrokes,
-        findStrokeAtPoint, onDeleteStrokes,
+        findStrokeAtPoint, onDeleteStrokes, isPinching,
       ]
     );
 
@@ -793,7 +859,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           // 일반 그리기 스트로크 저장
           const pts = currentStrokePoints.current;
           if (pts.length >= 2) {
-            onAddStroke({ tool: activeTool, points: pts, color: foregroundColor, size: brushSize, opacity });
+            onAddStroke({ tool: activeTool, points: pts, color: foregroundColor, size: brushSize, opacity, hardness });
           }
         }
 
@@ -808,7 +874,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         startPoint.current = null;
       },
       [
-        activeTool, foregroundColor, brushSize, opacity, getCanvasPoint,
+        activeTool, foregroundColor, brushSize, opacity, hardness, getCanvasPoint,
         isMovingStrokes, lassoRect, findStrokesInRect, onSelectStrokeIds, onAddStroke,
       ]
     );
@@ -853,7 +919,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     }
     onClearAllStrokes?.();
     setSelectedImgId(null);
-  }, [onClearAllStrokes, setSelectedImgId]);
+    setSelectedLayerImgIds([]);
+  }, [onClearAllStrokes, setSelectedImgId, setSelectedLayerImgIds]);
     const handleImgMouseDown = useCallback(
       (e: React.MouseEvent, imgId: string) => {
         e.stopPropagation();
@@ -908,6 +975,139 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       imgResizeRef.current = null;
     }, []);
 
+    // ── 레이어 이미지(캐릭터/배경) 핸들러 ──
+    const handleLayerImgMouseDown = useCallback(
+      (e: React.MouseEvent, layerId: string) => {
+        e.stopPropagation();
+        // Shift+클릭: 다중 선택 토글
+        if (e.shiftKey) {
+          setSelectedLayerImgIds((prev) =>
+            prev.includes(layerId) ? prev.filter((id) => id !== layerId) : [...prev, layerId]
+          );
+          return;
+        }
+        // 일반 클릭: 단일 선택
+        if (!selectedLayerImgIds.includes(layerId)) {
+          setSelectedLayerImgIds([layerId]);
+        }
+        // 드래그 준비 (선택된 모든 레이어)
+        const selIds = selectedLayerImgIds.includes(layerId) ? selectedLayerImgIds : [layerId];
+        const positions = selIds.map((id) => {
+          const l = layers.find((l2) => l2.id === id);
+          return { id, x: l?.imgX ?? 0, y: l?.imgY ?? 0 };
+        });
+        layerImgDragRef.current = { startX: e.clientX, startY: e.clientY, origPositions: positions };
+        setIsDraggingLayerImg(true);
+      },
+      [layers, selectedLayerImgIds]
+    );
+
+    const handleLayerImgResizeMouseDown = useCallback(
+      (e: React.MouseEvent, layerId: string) => {
+        e.stopPropagation();
+        const layer = layers.find((l) => l.id === layerId);
+        if (!layer || layer.imgW === undefined || layer.imgH === undefined) return;
+        const selIds = selectedLayerImgIds.includes(layerId) ? selectedLayerImgIds : [layerId];
+        const data = selIds.map((id) => {
+          const l = layers.find((l2) => l2.id === id);
+          const lw = l?.imgW ?? 400;
+          const lh = l?.imgH ?? 400;
+          return {
+            id,
+            x: l?.imgX ?? 0,
+            y: l?.imgY ?? 0,
+            w: lw,
+            h: lh,
+            aspectRatio: lw / lh,
+          };
+        });
+        layerImgResizeRef.current = { startX: e.clientX, startY: e.clientY, origData: data };
+        setIsResizingLayerImg(true);
+      },
+      [layers, selectedLayerImgIds]
+    );
+
+    const handleLayerImgRotateMouseDown = useCallback(
+      (e: React.MouseEvent, layerId: string) => {
+        e.stopPropagation();
+        const layer = layers.find((l) => l.id === layerId);
+        if (!layer || layer.imgX === undefined || layer.imgY === undefined) return;
+        const selIds = selectedLayerImgIds.includes(layerId) ? selectedLayerImgIds : [layerId];
+        const origAngles = selIds.map((id) => {
+          const l = layers.find((l2) => l2.id === id);
+          return { id, rotation: l?.imgRotation ?? 0 };
+        });
+        // 중심점 (캐릭터 이미지의 화면상 중심)
+        const centerScreenX = (layer.imgX + (layer.imgW ?? 400) / 2) * scale;
+        const centerScreenY = (layer.imgY + (layer.imgH ?? 400) / 2) * scale;
+        layerImgRotateRef.current = { startX: e.clientX, startY: e.clientY, origAngles, centerX: centerScreenX, centerY: centerScreenY };
+        setIsRotatingLayerImg(true);
+      },
+      [layers, selectedLayerImgIds, scale]
+    );
+
+    const handleLayerImgMouseMove = useCallback(
+      (e: React.MouseEvent) => {
+        if (isDraggingLayerImg && layerImgDragRef.current) {
+          const dx = (e.clientX - layerImgDragRef.current.startX) / scale;
+          const dy = (e.clientY - layerImgDragRef.current.startY) / scale;
+          for (const { id, x, y } of layerImgDragRef.current.origPositions) {
+            const layer = layers.find((l) => l.id === id);
+            const lw = layer?.imgW ?? 400;
+            const lh = layer?.imgH ?? 400;
+            const clamped = clampToCanvas(x + dx, y + dy, lw, lh);
+            onUpdateLayerImage?.(id, clamped.x, clamped.y, lw, lh);
+          }
+        }
+        if (isResizingLayerImg && layerImgResizeRef.current) {
+          const dx = (e.clientX - layerImgResizeRef.current.startX) / scale;
+          const dy = (e.clientY - layerImgResizeRef.current.startY) / scale;
+          for (const { id, x, y, w, h, aspectRatio } of layerImgResizeRef.current.origData) {
+            const useDx = Math.abs(dx) >= Math.abs(dy);
+            let newW: number, newH: number, newX: number, newY: number;
+            if (useDx) {
+              newW = Math.max(50, w + dx);
+              newH = newW / aspectRatio;
+              const dh2 = newH - h;
+              newX = x - dh2 / 2;
+              newY = y - dh2 / 2;
+            } else {
+              newH = Math.max(50, h + dy);
+              newW = newH * aspectRatio;
+              const dw2 = newW - w;
+              newX = x - dw2 / 2;
+              newY = y - dw2 / 2;
+            }
+            const clamped = clampToCanvas(newX, newY, newW, newH);
+            onUpdateLayerImage?.(id, clamped.x, clamped.y, newW, newH);
+          }
+        }
+        if (isRotatingLayerImg && layerImgRotateRef.current) {
+          const { startX, startY, centerX, centerY, origAngles } = layerImgRotateRef.current;
+          const startAngle = Math.atan2(startY - centerY, startX - centerX);
+          const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+          const deltaDeg = ((currentAngle - startAngle) * 180) / Math.PI;
+          for (const { id, rotation } of origAngles) {
+            let newRotation = rotation + deltaDeg;
+            // 0~360 범위로 정규화
+            newRotation = ((newRotation % 360) + 360) % 360;
+            const layer = layers.find((l) => l.id === id);
+            onUpdateLayerImage?.(id, layer?.imgX ?? 0, layer?.imgY ?? 0, layer?.imgW ?? 400, layer?.imgH ?? 400, newRotation);
+          }
+        }
+      },
+      [isDraggingLayerImg, isResizingLayerImg, isRotatingLayerImg, scale, layers, onUpdateLayerImage]
+    );
+
+    const handleLayerImgMouseUp = useCallback(() => {
+      setIsDraggingLayerImg(false);
+      setIsResizingLayerImg(false);
+      setIsRotatingLayerImg(false);
+      layerImgDragRef.current = null;
+      layerImgResizeRef.current = null;
+      layerImgRotateRef.current = null;
+    }, []);
+
     const commitTextInput = useCallback(() => {
       if (!textInput || !textValue.trim()) {
         setTextInput(null);
@@ -930,11 +1130,79 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setTextValue("");
     }, [textInput, textValue, brushSize, foregroundColor, opacity]);
 
+    // 마우스 휠로 캐릭터 레이어 이미지 확대/축소
+    const handleWheel = useCallback(
+      (e: React.WheelEvent) => {
+        if (selectedLayerImgIds.length === 0) return;
+
+        e.preventDefault();
+
+        const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+        for (const id of selectedLayerImgIds) {
+          const layer = layers.find((l) => l.id === id);
+          if (!layer || layer.imgW === undefined || layer.imgH === undefined || layer.imgX === undefined || layer.imgY === undefined) continue;
+
+          const newW = Math.max(50, Math.min(2000, layer.imgW * zoomFactor));
+          const newH = Math.max(50, Math.min(2000, layer.imgH * zoomFactor));
+          const dw = newW - layer.imgW;
+          const dh = newH - layer.imgH;
+          const newX = layer.imgX - dw / 2;
+          const newY = layer.imgY - dh / 2;
+          const clamped = clampToCanvas(newX, newY, newW, newH);
+
+          onUpdateLayerImage?.(id, clamped.x, clamped.y, newW, newH);
+        }
+      },
+      [selectedLayerImgIds, layers, onUpdateLayerImage]
+    );
+
     const isBalloonInteractive = activeTool === "balloon" || activeTool === "select" || activeTool === "move";
 
+    // ── 핀치 투 줌 핸들러 ──
+    const getTouchDistance = (touches: React.TouchList): number => {
+      if (touches.length < 2) return 0;
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const dist = getTouchDistance(e.touches);
+        pinchRef.current = { initialDist: dist, lastZoom: zoom };
+        setIsPinching(true);
+      }
+    }, [zoom]);
+
+    const handleTouchMove = useCallback((e: React.TouchEvent) => {
+      if (e.touches.length === 2 && pinchRef.current) {
+        e.preventDefault();
+        const dist = getTouchDistance(e.touches);
+        const threshold = 15;
+        const diff = dist - pinchRef.current.initialDist;
+
+        if (Math.abs(diff) >= threshold) {
+          const steps = Math.floor(Math.abs(diff) / threshold);
+          if (diff > 0) {
+            for (let i = 0; i < steps; i++) onZoomIn();
+          } else {
+            for (let i = 0; i < steps; i++) onZoomOut();
+          }
+          pinchRef.current.initialDist = dist;
+        }
+      }
+    }, [onZoomIn, onZoomOut]);
+
+    const handleTouchEnd = useCallback(() => {
+      pinchRef.current = null;
+      setIsPinching(false);
+    }, []);
+
     const getCursor = () => {
-      if (isDraggingImg) return "grabbing";
-      if (isResizingImg) return "nwse-resize";
+      if (isDraggingImg || isDraggingLayerImg) return "grabbing";
+      if (isResizingImg || isResizingLayerImg) return "nwse-resize";
+      if (isRotatingLayerImg) return "grabbing";
       if (isMovingStrokes) return "grabbing";
       if (activeTool === "stroke-select") return "default";
       if (activeTool === "stroke-eraser") return "crosshair";
@@ -964,17 +1232,17 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           <div className="flex-1 flex items-center gap-3 px-4 min-w-0 overflow-x-auto">
             <div className="flex items-center gap-1 shrink-0">
               <button
-                onClick={() => setShowRuler((v) => !v)}
+                onClick={() => { if (onToggleRuler) onToggleRuler(); else setShowRuler((v) => !v); }}
                 className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] cursor-pointer transition-colors whitespace-nowrap ${
-                  showRuler ? "bg-orange-500/20 text-orange-400" : "text-[#666] hover:bg-[#2a2a2a] hover:text-[#aaa]"
+                  effectiveShowRuler ? "bg-orange-500/20 text-orange-400" : "text-[#666] hover:bg-[#2a2a2a] hover:text-[#aaa]"
                 }`}
               >
                 <i className="ri-ruler-line" /> 눈금자
               </button>
               <button
-                onClick={() => setShowGrid((v) => !v)}
+                onClick={() => { if (onToggleGrid) onToggleGrid(); else setShowGrid((v) => !v); }}
                 className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] cursor-pointer transition-colors whitespace-nowrap ${
-                  showGrid ? "bg-orange-500/20 text-orange-400" : "text-[#666] hover:bg-[#2a2a2a] hover:text-[#aaa]"
+                  effectiveShowGrid ? "bg-orange-500/20 text-orange-400" : "text-[#666] hover:bg-[#2a2a2a] hover:text-[#aaa]"
                 }`}
               >
                 <i className="ri-grid-line" /> 격자
@@ -1065,14 +1333,95 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               <div className="flex items-center gap-1.5 px-2 h-6 bg-orange-500/10 rounded text-[10px] text-orange-400 whitespace-nowrap shrink-0">
                 <i className="ri-image-line" />
                 드래그: 이동 · 우하단 핸들: 크기조절
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
                 <button
-                  onClick={() => { onDeleteCanvasImage?.(selectedImgId); setSelectedImgId(null); }}
+                  onClick={() => onUpdateCanvasImageLayerPosition?.(selectedImgId, "up")}
+                  title="레이어 뒤로"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-arrow-up-s-line" />
+                </button>
+                <span className="text-[9px] text-[#666]">{canvasImages.find((i) => i.id === selectedImgId)?.layerPosition ?? layers.length}/{layers.length}</span>
+                <button
+                  onClick={() => onUpdateCanvasImageLayerPosition?.(selectedImgId, "down")}
+                  title="레이어 앞으로"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-arrow-down-s-line" />
+                </button>
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
+                <button
+                  onClick={() => { onDeleteCanvasImage?.(selectedImgId); setSelectedImgId(null); setSelectedLayerImgIds([]); }}
                   className="ml-1 px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded text-[9px] cursor-pointer hover:bg-red-500/30 transition-colors whitespace-nowrap"
                 >
                   <i className="ri-delete-bin-line" /> 삭제
                 </button>
               </div>
             )}
+
+            {selectedLayerImgIds.length > 0 && (() => {
+              const selLayer = layers.find((l) => l.id === selectedLayerImgIds[0]);
+              const lw = selLayer?.imgW ?? 480;
+              const lh = selLayer?.imgH ?? 680;
+              const count = selectedLayerImgIds.length;
+              const handleCharZoom = (factor: number) => {
+                for (const id of selectedLayerImgIds) {
+                  const l = layers.find((l2) => l2.id === id);
+                  if (!l || l.imgW === undefined || l.imgH === undefined || l.imgX === undefined || l.imgY === undefined) continue;
+                  const newW = Math.max(50, Math.min(2000, l.imgW * factor));
+                  const newH = Math.max(50, Math.min(2000, l.imgH * factor));
+                  const dw = newW - l.imgW;
+                  const dh = newH - l.imgH;
+                  const clamped = clampToCanvas(l.imgX - dw / 2, l.imgY - dh / 2, newW, newH);
+                  onUpdateLayerImage?.(id, clamped.x, clamped.y, newW, newH);
+                }
+              };
+              return (
+              <div className="flex items-center gap-1.5 px-2 h-6 bg-orange-500/10 rounded text-[10px] text-orange-400 whitespace-nowrap shrink-0">
+                <i className="ri-user-line" />
+                {count > 1 ? <span className="text-[9px] bg-orange-500/30 px-1 rounded">{count}개</span> : null}
+                캐릭터: 드래그·휠·핸들로 확대축소/회전
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
+                <button
+                  onClick={() => handleCharZoom(0.9)}
+                  title="축소"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-zoom-out-line" />
+                </button>
+                <span className="text-[9px] text-[#ccc] font-mono">{Math.round(lw)}×{Math.round(lh)}</span>
+                <button
+                  onClick={() => handleCharZoom(1.1)}
+                  title="확대"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-zoom-in-line" />
+                </button>
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
+                <button
+                  onClick={() => {
+                    for (const id of selectedLayerImgIds) {
+                      const l = layers.find((l2) => l2.id === id);
+                      if (!l) continue;
+                      const currentRotation = l.imgRotation ?? 0;
+                      onUpdateLayerImage?.(id, l.imgX ?? 0, l.imgY ?? 0, l.imgW ?? 400, l.imgH ?? 400, ((currentRotation + 15) % 360));
+                    }
+                  }}
+                  title="15° 회전"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-loop-right-line" />
+                </button>
+                <button
+                  onClick={() => { setSelectedLayerImgIds([]); }}
+                  className="ml-1 px-1 py-0.5 text-[#666] hover:text-[#aaa] cursor-pointer whitespace-nowrap"
+                  title="선택 해제"
+                >
+                  <i className="ri-close-line" />
+                </button>
+              </div>
+              );
+            })()}
 
             <div className="flex items-center gap-2 text-[10px] text-[#555] shrink-0">
               {cursorPos && activeTool !== "balloon" && (
@@ -1096,7 +1445,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         </div>
 
         {/* 눈금자 */}
-        {showRuler && (
+        {effectiveShowRuler && (
           <div className="absolute top-9 left-0 right-0 h-5 bg-[#1a1a1a] border-b border-[#2a2a2a] z-10 overflow-hidden">
             <div className="flex h-full items-end pb-0.5 pl-5">
               {Array.from({ length: 40 }).map((_, i) => (
@@ -1108,7 +1457,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             </div>
           </div>
         )}
-        {showRuler && (
+        {effectiveShowRuler && (
           <div className="absolute left-0 top-9 bottom-0 w-5 bg-[#1a1a1a] border-r border-[#2a2a2a] z-10 overflow-hidden">
             <div className="flex flex-col items-end pr-0.5 pt-5">
               {Array.from({ length: 50 }).map((_, i) => (
@@ -1124,10 +1473,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         {/* 캔버스 스크롤 영역 */}
         <div
           className="flex-1 overflow-auto flex items-start justify-start"
-          style={{ paddingTop: showRuler ? 20 : 0, paddingLeft: showRuler ? 20 : 0 }}
-          onMouseMove={handleImgMouseMove}
-          onMouseUp={handleImgMouseUp}
-          onMouseLeave={handleImgMouseUp}
+          style={{ paddingTop: effectiveShowRuler ? 20 : 0, paddingLeft: effectiveShowRuler ? 20 : 0 }}
+          onMouseMove={(e) => { handleImgMouseMove(e); handleLayerImgMouseMove(e); }}
+          onMouseUp={(e) => { handleImgMouseUp(e); handleLayerImgMouseUp(e); }}
+          onMouseLeave={(e) => { handleImgMouseUp(e); handleLayerImgMouseUp(e); }}
+          onWheel={handleWheel}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
         >
           {/* 격자 배경 */}
           <div
@@ -1148,7 +1502,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
               boxShadow: "0 0 0 1px #333, 0 8px 40px rgba(0,0,0,0.8)",
             }}
-            onClick={() => setSelectedImgId(null)}
+            onClick={() => { setSelectedImgId(null); setSelectedLayerImgIds([]); }}
           >
             {/* ── 흰 배경 레이어 (맨 아래) ── */}
             <div
@@ -1157,52 +1511,104 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             />
 
             {/* ── 배경 레이어 이미지 (type: background) ── */}
-            {layers.filter((l) => l.type === "background" && l.imageUrl && l.visible).map((layer) => (
-              <div
-                key={layer.id}
-                className="absolute top-0 left-0"
-                style={{
-                  width: CANVAS_W * scale,
-                  height: CANVAS_H * scale,
-                  zIndex: 2,
-                  opacity: layer.opacity / 100,
-                }}
-              >
-                <img
-                  src={layer.imageUrl}
-                  alt={layer.name}
-                  className="w-full h-full"
-                  style={{ objectFit: "fill", display: "block", userSelect: "none", pointerEvents: "none" }}
-                  draggable={false}
-                />
-              </div>
-            ))}
+            {layers.filter((l) => l.type === "background" && l.imageUrl && l.visible).map((layer) => {
+              const layerIdx = layers.findIndex((l) => l.id === layer.id);
+              const layerZ = 2 + layerIdx;
+              return (
+                <div
+                  key={layer.id}
+                  className="absolute top-0 left-0"
+                  style={{
+                    width: CANVAS_W * scale,
+                    height: CANVAS_H * scale,
+                    zIndex: layerZ,
+                    opacity: layer.opacity / 100,
+                  }}
+                >
+                  <img
+                    src={layer.imageUrl}
+                    alt={layer.name}
+                    className="w-full h-full"
+                    style={{ objectFit: "fill", display: "block", userSelect: "none", pointerEvents: "none" }}
+                    draggable={false}
+                  />
+                </div>
+              );
+            })}
 
-            {/* ── 캐릭터 레이어 이미지 (type: character) ── */}
-            {layers.filter((l) => l.type === "character" && l.imageUrl && l.visible).map((layer) => (
-              <div
-                key={layer.id}
-                className="absolute top-0 left-0"
-                style={{
-                  width: CANVAS_W * scale,
-                  height: CANVAS_H * scale,
-                  zIndex: 3,
-                  opacity: layer.opacity / 100,
-                }}
-              >
-                <img
-                  src={layer.imageUrl}
-                  alt={layer.name}
-                  className="w-full h-full"
-                  style={{ objectFit: "fill", display: "block", userSelect: "none", pointerEvents: "none" }}
-                  draggable={false}
-                />
-              </div>
-            ))}
+            {/* ── 캐릭터 레이어 이미지 (type: character) — 드래그/리사이즈/회전 가능 ── */}
+            {layers.filter((l) => l.type === "character" && l.imageUrl && l.visible && l.imgX !== undefined && l.imgY !== undefined).map((layer) => {
+              const lx = layer.imgX ?? 160;
+              const ly = layer.imgY ?? 210;
+              const lw = layer.imgW ?? 480;
+              const lh = layer.imgH ?? 680;
+              const rotation = layer.imgRotation ?? 0;
+              const isSelected = selectedLayerImgIds.includes(layer.id);
+              const isPrimary = isSelected && selectedLayerImgIds[0] === layer.id;
+              const layerIdx = layers.findIndex((l) => l.id === layer.id);
+              const layerZ = 2 + layerIdx;
+              return (
+                <div
+                  key={layer.id}
+                  className="absolute"
+                  style={{
+                    left: lx * scale,
+                    top: ly * scale,
+                    width: lw * scale,
+                    height: lh * scale,
+                    zIndex: layerZ,
+                    opacity: layer.opacity / 100,
+                    outline: isSelected ? "2px solid #f97316" : "none",
+                    outlineOffset: "1px",
+                    cursor: isDraggingLayerImg && isSelected ? "grabbing" : "grab",
+                    transformOrigin: "center center",
+                    transform: rotation !== 0 ? `rotate(${rotation}deg)` : "none",
+                  }}
+                  onMouseDown={(e) => handleLayerImgMouseDown(e, layer.id)}
+                >
+                  <img
+                    src={layer.imageUrl}
+                    alt={layer.name}
+                    className="w-full h-full"
+                    style={{ objectFit: "fill", display: "block", userSelect: "none", pointerEvents: "none" }}
+                    draggable={false}
+                  />
+                  {isSelected && (
+                    <>
+                      {/* 모서리 점들 */}
+                      <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
+                      <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
+                      <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
+                      {/* 리사이즈 핸들 (우하단) */}
+                      <div
+                        className="absolute -bottom-2 -right-2 w-4 h-4 bg-orange-500 rounded-sm border-2 border-white cursor-nwse-resize flex items-center justify-center"
+                        onMouseDown={(e) => { e.stopPropagation(); handleLayerImgResizeMouseDown(e, layer.id); }}
+                      >
+                        <i className="ri-arrow-right-down-line text-white" style={{ fontSize: 8 }} />
+                      </div>
+                      {/* 회전 핸들 (상단 중앙) */}
+                      <div
+                        className="absolute -top-6 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full border-2 border-white cursor-grab flex items-center justify-center"
+                        onMouseDown={(e) => { e.stopPropagation(); handleLayerImgRotateMouseDown(e, layer.id); }}
+                      >
+                        <i className="ri-loop-right-line text-white" style={{ fontSize: 7 }} />
+                      </div>
+                      {/* 정보 라벨 */}
+                      {isPrimary && (
+                        <div className="absolute -bottom-5 left-0 text-[9px] text-orange-400 whitespace-nowrap bg-[#111]/80 px-1 rounded">
+                          {layer.name} · {Math.round(lw)} × {Math.round(lh)}{rotation !== 0 ? ` · ${Math.round(rotation)}°` : ""}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
 
             {/* ── 이미지 레이어 (흰 배경 위, 드로잉 아래) ── */}
             {canvasImages.map((img) => {
               const isSelected = selectedImgId === img.id;
+              const canvasImgZ = 2 + (img.layerPosition ?? layers.length);
               return (
                 <div
                   key={img.id}
@@ -1212,11 +1618,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                     top: img.y * scale,
                     width: img.w * scale,
                     height: img.h * scale,
-                    zIndex: 4,
+                    zIndex: canvasImgZ,
                     outline: isSelected ? "2px solid #f97316" : "none",
                     cursor: isDraggingImg && isSelected ? "grabbing" : "grab",
                   }}
                   onMouseDown={(e) => handleImgMouseDown(e, img.id)}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <img
                     src={img.url}
@@ -1253,6 +1660,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             })}
 
             {/* ── 메인 드로잉 캔버스 ── */}
+            {(() => {
+              const selectedLayerIndex = layers.findIndex(l => l.id === selectedLayerId);
+              const strokeBaseZ = selectedLayerIndex >= 0 ? 2 + selectedLayerIndex : 5 + layers.length;
+              return (
             <canvas
               ref={canvasRef}
               width={CANVAS_W}
@@ -1262,7 +1673,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 transform: `scale(${scale})`,
                 cursor: getCursor(),
                 imageRendering: zoom > 200 ? "pixelated" : "auto",
-                zIndex: 5,
+                zIndex: strokeBaseZ,
                 background: "transparent",
                 touchAction: "none",
               }}
@@ -1275,15 +1686,23 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
             />
+              );
+            })()}
 
             {/* 오버레이 캔버스 (도형 미리보기) */}
+            {(() => {
+              const selectedLayerIndex = layers.findIndex(l => l.id === selectedLayerId);
+              const strokeBaseZ = selectedLayerIndex >= 0 ? 2 + selectedLayerIndex : 5 + layers.length;
+              return (
             <canvas
               ref={overlayRef}
               width={CANVAS_W}
               height={CANVAS_H}
               className="absolute top-0 left-0 origin-top-left pointer-events-none"
-              style={{ transform: `scale(${scale})`, zIndex: 6 }}
+              style={{ transform: `scale(${scale})`, zIndex: strokeBaseZ + 1 }}
             />
+              );
+            })()}
 
             {/* 라소 선택 영역 표시 */}
             {lassoDisplay && (
@@ -1294,7 +1713,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   top: lassoDisplay.top,
                   width: lassoDisplay.width,
                   height: lassoDisplay.height,
-                  zIndex: 7,
+                  zIndex: (layers.findIndex(l => l.id === selectedLayerId) >= 0 ? 2 + layers.findIndex(l => l.id === selectedLayerId)! : 5 + layers.length) + 2,
                 }}
               />
             )}
@@ -1342,53 +1761,17 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               </div>
             )}
 
-            {/* 텍스트 인라인 입력창 */}
-            {textInput && (
-              <div
-                className="absolute z-[20] flex items-center"
-                style={{ left: textInput.x, top: textInput.y }}
-              >
-                <input
-                  ref={textInputRef}
-                  type="text"
-                  value={textValue}
-                  onChange={(e) => setTextValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitTextInput();
-                    if (e.key === "Escape") { setTextInput(null); setTextValue(""); }
-                  }}
-                  onBlur={commitTextInput}
-                  placeholder="텍스트 입력 후 Enter"
-                  className="outline-none border-b-2 border-orange-400 bg-transparent px-1"
-                  style={{
-                    fontFamily: '"Noto Sans KR", sans-serif',
-                    fontSize: Math.max(12, brushSize * 2 * scale),
-                    color: foregroundColor,
-                    minWidth: 120,
-                    caretColor: foregroundColor,
-                  }}
-                />
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={commitTextInput}
-                  className="ml-1 px-2 py-0.5 bg-orange-500 text-white text-xs rounded cursor-pointer whitespace-nowrap"
-                >
-                  확인
-                </button>
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { setTextInput(null); setTextValue(""); }}
-                  className="ml-1 px-2 py-0.5 bg-[#333] text-[#aaa] text-xs rounded cursor-pointer whitespace-nowrap"
-                >
-                  취소
-                </button>
-              </div>
-            )}
-
-            {/* 말풍선 SVG 오버레이 - balloon/select/move 툴 모두 클릭 가능 */}
-            <div style={{ zIndex: 8, position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: activeTool === "balloon" || activeTool === "select" || activeTool === "move" ? "auto" : "none" }}>
+            {/* 말풍선 SVG 오버레이 */}
+            {(() => {
+              const selectedLayerIndex = layers.findIndex(l => l.id === selectedLayerId);
+              const strokeBaseZ = selectedLayerIndex >= 0 ? 2 + selectedLayerIndex : 5 + layers.length;
+              // 숨겨진 레이어의 말풍선은 제외하고 전달
+              const visibleLayerIds = new Set(layers.filter(l => l.visible).map(l => l.id));
+              const visibleBalloons = balloons.filter(b => visibleLayerIds.has(b.layerId));
+              return (
+            <div style={{ zIndex: strokeBaseZ + 3, position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: activeTool === "balloon" || activeTool === "select" || activeTool === "move" ? "auto" : "none" }}>
               <BalloonOverlay
-                balloons={balloons}
+                balloons={visibleBalloons}
                 selectedBalloonId={selectedBalloonId}
                 scale={scale}
                 activeTool={activeTool}
@@ -1400,18 +1783,68 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 onDelete={onDeleteBalloon}
               />
             </div>
+              );
+            })()}
 
             {/* 격자 오버레이 */}
-            {showGrid && (
+            {effectiveShowGrid && (
               <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
                   backgroundImage:
                     "linear-gradient(rgba(100,100,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(100,100,255,0.1) 1px, transparent 1px)",
                   backgroundSize: `${50 * scale}px ${50 * scale}px`,
-                  zIndex: 9,
+                  zIndex: (layers.findIndex(l => l.id === selectedLayerId) >= 0 ? 2 + layers.findIndex(l => l.id === selectedLayerId)! : 5 + layers.length) + 4,
                 }}
               />
+            )}
+
+            {/* 가이드라인 오버레이 */}
+            {guideVisible && (
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  zIndex: (layers.findIndex(l => l.id === selectedLayerId) >= 0 ? 2 + layers.findIndex(l => l.id === selectedLayerId)! : 5 + layers.length) + 4,
+                }}
+              >
+                {/* 3분할 가이드 (세로) */}
+                {[1/3, 2/3].map((frac, i) => (
+                  <div
+                    key={`gv-${i}`}
+                    className="absolute top-0 h-full"
+                    style={{
+                      left: `${CANVAS_W * scale * frac}px`,
+                      borderLeft: "1px dashed rgba(0,200,200,0.25)",
+                    }}
+                  />
+                ))}
+                {/* 3분할 가이드 (가로) */}
+                {[1/3, 2/3].map((frac, i) => (
+                  <div
+                    key={`gh-${i}`}
+                    className="absolute left-0 w-full"
+                    style={{
+                      top: `${CANVAS_H * scale * frac}px`,
+                      borderTop: "1px dashed rgba(0,200,200,0.25)",
+                    }}
+                  />
+                ))}
+                {/* 중앙 십자선 */}
+                <div
+                  className="absolute top-0 h-full"
+                  style={{
+                    left: `${CANVAS_W * scale / 2}px`,
+                    borderLeft: "1px solid rgba(0,200,200,0.15)",
+                  }}
+                />
+                <div
+                  className="absolute left-0 w-full"
+                  style={{
+                    top: `${CANVAS_H * scale / 2}px`,
+                    borderTop: "1px solid rgba(0,200,200,0.15)",
+                  }}
+                />
+              </div>
             )}
 
             {/* 브러시 커서 미리보기 */}
@@ -1424,7 +1857,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   left: cursorPos.x * scale - (brushSize * scale) / 2,
                   top: cursorPos.y * scale - (brushSize * scale) / 2,
                   opacity: 0.6,
-                  zIndex: 10,
+                  zIndex: (layers.findIndex(l => l.id === selectedLayerId) >= 0 ? 2 + layers.findIndex(l => l.id === selectedLayerId)! : 5 + layers.length) + 5,
                 }}
               />
             )}
@@ -1439,7 +1872,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   left: cursorPos.x * scale - (Math.max(brushSize, 20) * scale) / 2,
                   top: cursorPos.y * scale - (Math.max(brushSize, 20) * scale) / 2,
                   opacity: 0.8,
-                  zIndex: 10,
+                  zIndex: (layers.findIndex(l => l.id === selectedLayerId) >= 0 ? 2 + layers.findIndex(l => l.id === selectedLayerId)! : 5 + layers.length) + 5,
                 }}
               />
             )}
