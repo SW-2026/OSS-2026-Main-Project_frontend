@@ -7,10 +7,10 @@ import BalloonPanel from "./BalloonPanel";
 import type { BalloonShape, BalloonItem } from "./BalloonPanel";
 import ImagePanel from "./ImagePanel";
 import type { AIGeneratedImage } from "./ImagePanel";
-import ScenarioGeneratePanel from "./ScenarioGeneratePanel";
+import AiTab from "./AiTab";
 import BackgroundLibraryPanel from "./BackgroundLibraryPanel";
 
-type TabType = "tool" | "library" | "image" | "balloon" | "scenario" | "background";
+type TabType = "tool" | "library" | "image" | "balloon" | "ai" | "background";
 
 interface LeftPanelProps {
   activeTool: DrawingTool;
@@ -176,7 +176,7 @@ export default function LeftPanel({
     { key: "balloon", icon: "ri-chat-1-line", label: "대사" },
     { key: "library", icon: "ri-image-2-line", label: "소재" },
     { key: "image", icon: "ri-quill-pen-line", label: "선화 편집" },
-    { key: "scenario", icon: "ri-film-line", label: "시나리오" },
+    { key: "ai", icon: "ri-sparkling-2-line", label: "AI" },
     { key: "background", icon: "ri-landscape-line", label: "배경" },
   ];
 
@@ -382,7 +382,7 @@ export default function LeftPanel({
                     // 배경 카드 — 자기 자산, 등록 없이 selectedBgIds에 add
                     const bg = backgrounds.find((b) => `bg-${b.assetId}` === item.id);
                     if (bg) {
-                      setActiveTab("scenario");
+                      setActiveTab("ai");
                       setPendingBackgroundAssetId(bg.assetId);
                       return;
                     }
@@ -398,7 +398,7 @@ export default function LeftPanel({
                     if (Number.isNaN(projectIdNum)) return;
                     try {
                       const created = await createCharacterFromLora(projectIdNum, lora.fileName);
-                      setActiveTab("scenario");
+                      setActiveTab("ai");
                       setPendingCharacter(created);
                     } catch (e) {
                       // eslint-disable-next-line no-console
@@ -440,9 +440,9 @@ export default function LeftPanel({
         />
       )}
 
-      {/* 시나리오 탭 — backend 파이프라인 (Pollinations와 별개) */}
-      {activeTab === "scenario" && (
-        <ScenarioGeneratePanel
+      {/* AI 탭 — 다컷/1컷 서브탭 (backend 파이프라인, Pollinations와 별개) */}
+      {activeTab === "ai" && (
+        <AiTab
           projectId={activeProjectId}
           episodeId={activeEpisodeId}
           pendingCharacter={pendingCharacter}
