@@ -85,3 +85,23 @@ export async function getCutEditorData(panelId: number): Promise<string | null> 
   );
   return res.data.data.cutEditorData;
 }
+
+// === 1컷 생성 (단일 컷) — 다컷 generate와 동일 폴링(/api/ai/tasks/{taskId}) 재사용 ===
+
+export interface GenerateSinglePanelBody {
+  scenarioText: string;
+  characterIds: number[];        // 첫 번째 1명만 백엔드에서 반영
+  backgroundAssetId: number | null;
+}
+
+// POST /api/episodes/{id}/panels/generate-single → TaskResponse(taskId 등). 비동기 202
+export async function generateSinglePanel(
+  episodeId: number,
+  body: GenerateSinglePanelBody
+): Promise<{ taskId: number }> {
+  const res = await api.post<ApiResponseEnvelope<{ taskId: number }>>(
+    `/api/episodes/${episodeId}/panels/generate-single`,
+    body
+  );
+  return res.data.data;
+}

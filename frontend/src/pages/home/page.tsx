@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useEditorState } from "@/hooks/useEditorState";
 import { useVectorize } from "@/hooks/useVectorize";
@@ -24,6 +24,16 @@ export default function WebtoonEditor() {
   const projectId = searchParams.get("projectId");
   const editor = useEditorState(projectId);
   const vectorize = useVectorize();
+
+  // 1컷 생성 COMPLETED 자동 흐름: 현재 컷 낙서 저장 → cuts 갱신(새 컷 포함) → 새 컷 활성화
+  const handleSingleCutComplete = useCallback(
+    async (newPanelId: number, episodeId: number) => {
+      await editor.handleSave();
+      await editor.refreshCutsForEpisode(episodeId);
+      editor.setActiveCut(String(newPanelId));
+    },
+    [editor]
+  );
   const canvasHandleRef = useRef<DrawingCanvasHandle>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportInitialFormat, setExportInitialFormat] = useState<"png" | "jpeg" | "pdf">("png");
@@ -200,6 +210,7 @@ export default function WebtoonEditor() {
           balloons={editor.balloons}
           activeProjectId={editor.activeProjectId}
           activeEpisodeId={editor.activeEpisodeId}
+          onSingleCutComplete={handleSingleCutComplete}
         />
 
         <div className="flex flex-col flex-1 overflow-hidden">

@@ -990,6 +990,31 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("saved");
   }, [activeProjectId, episodes.length]);
 
+  // 특정 에피소드의 cuts를 backend listPanels로 재생성 (해당 에피소드만 교체, 나머지 유지)
+  // 1컷/다컷 생성 후 컷 트랙 자동 갱신용 — 공용 함수 (현재 1컷에서만 호출)
+  const refreshCutsForEpisode = useCallback(async (episodeId: number) => {
+    try {
+      const panels = await listPanels(episodeId);
+      const epIdStr = String(episodeId);
+      const refreshed: Cut[] = panels.map((p) => ({
+        id: String(p.panelId),
+        index: p.panelOrder,
+        label: `컷 ${p.panelOrder}`,
+        prompt: p.prompt ?? "",
+        thumbnail: toAbsoluteImageUrl(p.finalImageUrl),
+        isActive: false,
+        isGenerated: p.status === "COMPLETED",
+        episodeId: epIdStr,
+        characterAssetUrl: toAbsoluteImageUrl(p.characterAssetUrl) || undefined,
+        backgroundAssetUrl: toAbsoluteImageUrl(p.backgroundAssetUrl) || undefined,
+      }));
+      setCuts((prev) => [...prev.filter((c) => c.episodeId !== epIdStr), ...refreshed]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[refreshCutsForEpisode] 실패:", err);
+    }
+  }, []);
+
   const addCut = useCallback(async () => {
     const currentEpId = activeEpisodeIdRef.current;
     const currentCuts = cutsRef.current.filter((c) => c.episodeId === currentEpId);
@@ -1212,6 +1237,7 @@ export function useEditorState(initialProjectId?: string | null) {
     deleteEpisode,
     addCut,
     deleteCut,
+    refreshCutsForEpisode,
     // zoom
     zoom,
     zoomIn,

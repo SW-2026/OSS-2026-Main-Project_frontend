@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import api from "@/lib/api";
-import { listPanels } from "@/lib/panelApi";
+import { listPanels, generateSinglePanel } from "@/lib/panelApi";
 
 export interface GeneratedPanel {
   panelId: number;
@@ -133,6 +133,74 @@ export function usePanelGeneration() {
     [stopPolling]
   );
 
+  // 1컷 생성 — start(다컷)와 독립. COMPLETED 시 targetId(=새 panelId)로 onComplete 콜백 호출
+  const startSingle = useCallback(
+    async (
+      episodeId: number,
+      body: { scenarioText: string; characterIds: number[]; backgroundAssetId: number | null },
+      onComplete: (newPanelId: number) => void | Promise<void>
+    ) => {
+      stopPolling();
+      setState({ status: "pending", progress: 0, panels: [], error: "" });
+
+      try {
+        const { taskId } = await generateSinglePanel(episodeId, body);
+        if (!taskId) {
+          setState((prev) => ({
+            ...prev,
+            status: "error",
+            error: "생성 태스크 ID를 받지 못했습니다.",
+          }));
+          return;
+        }
+
+        setState((prev) => ({ ...prev, status: "processing", progress: 5 }));
+
+        pollRef.current = setInterval(async () => {
+          try {
+            const pollRes = await api.get(`/api/ai/tasks/${taskId}`);
+            const pollData = pollRes.data?.data ?? pollRes.data;
+
+            if (pollData?.status === "COMPLETED") {
+              stopPolling();
+              setState({ status: "completed", progress: 100, panels: [], error: "" });
+              const newPanelId = pollData?.targetId;
+              if (newPanelId) await onComplete(Number(newPanelId));
+              return;
+            }
+
+            if (pollData?.status === "FAILED") {
+              stopPolling();
+              setState((prev) => ({
+                ...prev,
+                status: "error",
+                error: pollData?.errorMessage ?? "1컷 생성에 실패했습니다.",
+              }));
+              return;
+            }
+
+            const pct = pollData?.progressPercent ?? 0;
+            setState((prev) => ({
+              ...prev,
+              progress: Math.max(prev.progress, Math.min(pct, 99)),
+            }));
+          } catch (pollErr) {
+            // eslint-disable-next-line no-console
+            console.error("[usePanelGeneration] startSingle polling error:", pollErr);
+          }
+        }, 2000);
+      } catch (err: any) {
+        stopPolling();
+        setState((prev) => ({
+          ...prev,
+          status: "error",
+          error: err?.message ?? "요청에 실패했습니다.",
+        }));
+      }
+    },
+    [stopPolling]
+  );
+
   // mount 시 또는 episode 전환 시 외부에서 panels seed 가능 (새로고침 후 복원용)
   const seed = useCallback(async (episodeId: number) => {
     try {
@@ -157,6 +225,7 @@ export function usePanelGeneration() {
     panels: state.panels,
     error: state.error,
     start,
+    startSingle,
     seed,
   };
 }

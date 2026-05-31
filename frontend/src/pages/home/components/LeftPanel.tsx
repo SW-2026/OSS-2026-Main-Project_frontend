@@ -50,6 +50,8 @@ interface LeftPanelProps {
   // 활성 프로젝트/에피소드 ID (ScenarioGeneratePanel로 전달)
   activeProjectId: string | null;
   activeEpisodeId: string;
+  // 1컷 생성 COMPLETED 시 (AiTab→OneCutPanel로 전달)
+  onSingleCutComplete: (newPanelId: number, episodeId: number) => void | Promise<void>;
 }
 
 const BASE_URL =
@@ -106,6 +108,7 @@ export default function LeftPanel({
   balloons,
   activeProjectId,
   activeEpisodeId,
+  onSingleCutComplete,
 }: LeftPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("tool");
   const [selectedBrushPreset, setSelectedBrushPreset] = useState(0);
@@ -449,6 +452,7 @@ export default function LeftPanel({
           onConsumePendingCharacter={() => setPendingCharacter(null)}
           pendingBackgroundAssetId={pendingBackgroundAssetId}
           onConsumePendingBackground={() => setPendingBackgroundAssetId(null)}
+          onSingleCutComplete={onSingleCutComplete}
         />
       )}
 
