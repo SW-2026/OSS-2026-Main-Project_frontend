@@ -1742,11 +1742,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                         <i className="ri-loop-right-line text-white" style={{ fontSize: 7 }} />
                       </div>
                       <button
-                        className="absolute -top-3 -right-3 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center cursor-pointer z-10"
+                        className="absolute -top-3 -right-3 w-6 h-6 bg-red-500 rounded-full border-2 border-white shadow-lg shadow-black/40 flex items-center justify-center cursor-pointer z-10 hover:bg-red-600 hover:scale-110 transition-all"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => { e.stopPropagation(); onDeleteCanvasImage?.(img.id); setSelectedImgId(null); }}
+                        title="이미지 삭제"
                       >
-                        <i className="ri-close-line text-white" style={{ fontSize: 9 }} />
+                        <i className="ri-close-line text-white font-bold" style={{ fontSize: 12 }} />
                       </button>
                       <div className="absolute -bottom-5 left-0 text-[9px] text-orange-400 whitespace-nowrap bg-[#111]/80 px-1 rounded">
                         {Math.round(img.w)} × {Math.round(img.h)}{rotation !== 0 ? ` · ${Math.round(rotation)}°` : ""}
@@ -1774,6 +1775,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 zIndex: strokeBaseZ,
                 background: "transparent",
                 touchAction: "none",
+                pointerEvents: (activeTool === "select" || activeTool === "move") ? "none" : "auto",
               }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
