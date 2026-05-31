@@ -27,6 +27,14 @@ export interface LoraRequestResponse {
   createdAt: string;
   completedAt: string | null;
   loraCatalogId: number | null;
+  imageUrls: string[];
+}
+
+// [관리자] 상태/메모 변경 (Phase 1.5)
+export interface LoraRequestUpdateBody {
+  status: LoraRequestStatus;
+  adminNotes?: string;
+  loraCatalogId?: number | null;
 }
 
 export interface LoraRequestCreateBody {
@@ -88,5 +96,17 @@ export async function listAllLoraRequests(
 // GET /api/admin/check — 현재 사용자가 관리자인지
 export async function checkAdmin(): Promise<boolean> {
   const res = await api.get<ApiResponseEnvelope<boolean>>("/api/admin/check");
+  return res.data.data;
+}
+
+// PATCH /api/admin/lora-requests/{id} — 관리자 상태/메모 변경 (Phase 1.5)
+export async function updateLoraRequest(
+  requestId: number,
+  body: LoraRequestUpdateBody
+): Promise<LoraRequestResponse> {
+  const res = await api.patch<ApiResponseEnvelope<LoraRequestResponse>>(
+    `/api/admin/lora-requests/${requestId}`,
+    body
+  );
   return res.data.data;
 }

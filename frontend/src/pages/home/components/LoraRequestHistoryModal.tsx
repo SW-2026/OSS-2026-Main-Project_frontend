@@ -1,17 +1,25 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   listMyLoraRequests,
   listAllLoraRequests,
   checkAdmin,
+  updateLoraRequest,
   type LoraRequestResponse,
   type LoraRequestStatus,
 } from "@/lib/loraRequestApi";
+import { listLoras, type LoraCatalogItem } from "@/lib/characterApi";
 
 interface LoraRequestHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   refreshKey: number; // 신청 성공 시 증가 → 재조회
 }
+
+const STATUSES: LoraRequestStatus[] = ["PENDING", "TRAINING", "COMPLETED", "FAILED", "REJECTED"];
+
+const BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8080";
+const resolveUrl = (u: string) => (u.startsWith("http") ? u : `${BASE_URL}${u}`);
 
 function statusBadge(s: LoraRequestStatus): string {
   switch (s) {
@@ -48,54 +56,89 @@ export default function LoraRequestHistoryModal({
   const [mine, setMine] = useState<LoraRequestResponse[]>([]);
   const [pending, setPending] = useState<LoraRequestResponse[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [loras, setLoras] = useState<LoraCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<LoraRequestResponse | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    let alive = true;
+  // 관리자 편집 폼
+  const [editStatus, setEditStatus] = useState<LoraRequestStatus>("PENDING");
+  const [editNotes, setEditNotes] = useState("");
+  const [editCatalogId, setEditCatalogId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setSelected(null);
-    (async () => {
+    try {
+      const list = await listMyLoraRequests();
+      setMine(list);
+      let admin = false;
       try {
-        const list = await listMyLoraRequests();
-        if (!alive) return;
-        setMine(list);
-        let admin = false;
-        try {
-          admin = await checkAdmin();
-        } catch {
-          admin = false;
-        }
-        if (!alive) return;
-        setIsAdmin(admin);
-        if (admin) {
-          try {
-            const p = await listAllLoraRequests("PENDING");
-            if (alive) setPending(p);
-          } catch {
-            // 관리자 목록 실패는 무시 (내 목록은 표시)
-          }
-        }
-      } catch (e: any) {
-        if (alive) setError(e?.message ?? "내역 조회에 실패했습니다.");
-      } finally {
-        if (alive) setLoading(false);
+        admin = await checkAdmin();
+      } catch {
+        admin = false;
       }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [isOpen, refreshKey]);
+      setIsAdmin(admin);
+      if (admin) {
+        try {
+          setPending(await listAllLoraRequests("PENDING"));
+        } catch {
+          /* 관리자 목록 실패 무시 */
+        }
+        try {
+          setLoras(await listLoras());
+        } catch {
+          /* 카탈로그 실패 무시 */
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "내역 조회에 실패했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelected(null);
+    load();
+  }, [isOpen, refreshKey, load]);
 
   if (!isOpen) return null;
+
+  const openDetail = (r: LoraRequestResponse) => {
+    setSelected(r);
+    setEditStatus(r.status);
+    setEditNotes(r.adminNotes ?? "");
+    setEditCatalogId(r.loraCatalogId);
+    setSaveError(null);
+  };
+
+  const handleAdminSave = async () => {
+    if (!selected) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await updateLoraRequest(selected.requestId, {
+        status: editStatus,
+        adminNotes: editNotes.trim() || undefined,
+        loraCatalogId: editStatus === "COMPLETED" ? editCatalogId : null,
+      });
+      setSelected(updated);
+      await load();
+    } catch (e: any) {
+      setSaveError(e?.response?.data?.message ?? e?.message ?? "저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const renderItem = (r: LoraRequestResponse) => (
     <button
       key={r.requestId}
-      onClick={() => setSelected(r)}
+      onClick={() => openDetail(r)}
       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] text-left cursor-pointer"
     >
       <span className={`text-[9px] px-1.5 py-0.5 rounded shrink-0 ${statusBadge(r.status)}`}>
@@ -160,7 +203,7 @@ export default function LoraRequestHistoryModal({
         {/* 상세 (오버레이) */}
         {selected && (
           <div className="absolute inset-0 bg-[#161616] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2a]">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2a] shrink-0">
               <button
                 onClick={() => setSelected(null)}
                 className="text-[#888] hover:text-[#ccc] text-sm cursor-pointer"
@@ -172,14 +215,92 @@ export default function LoraRequestHistoryModal({
                 {selected.status}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-2 text-xs">
+            <div className="flex-1 overflow-y-auto p-5 space-y-3 text-xs">
               <Row label="캐릭터명" value={selected.characterName} />
               <Row label="트리거" value={selected.triggerWord} />
               <Row label="이미지 수" value={`${selected.imageCount}장`} />
-              <Row label="이미지 경로" value={selected.imageDir ?? "—"} />
               <Row label="신청일" value={fmt(selected.createdAt)} />
               <Row label="완료일" value={fmt(selected.completedAt)} />
-              {selected.adminNotes && <Row label="관리자 메모" value={selected.adminNotes} />}
+
+              {/* 레퍼런스 이미지 */}
+              {selected.imageUrls.length > 0 && (
+                <div>
+                  <p className="text-[#555] mb-1.5">레퍼런스 이미지 ({selected.imageUrls.length})</p>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {selected.imageUrls.map((u) => (
+                      <a key={u} href={resolveUrl(u)} target="_blank" rel="noreferrer">
+                        <img
+                          src={resolveUrl(u)}
+                          alt=""
+                          className="w-full aspect-square object-cover rounded border border-[#2a2a2a] bg-[#111] hover:border-orange-500/50"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 관리자 처리 */}
+              {isAdmin ? (
+                <div className="pt-3 border-t border-[#2a2a2a] space-y-2">
+                  <p className="text-[10px] text-orange-400 uppercase tracking-wider font-medium">
+                    [관리자] 처리
+                  </p>
+                  <div>
+                    <label className="text-[10px] text-[#888]">상태</label>
+                    <select
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value as LoraRequestStatus)}
+                      className="w-full mt-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500"
+                    >
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {editStatus === "COMPLETED" && (
+                    <div>
+                      <label className="text-[10px] text-[#888]">LoRA 카탈로그 연결 (선택)</label>
+                      <select
+                        value={editCatalogId ?? ""}
+                        onChange={(e) =>
+                          setEditCatalogId(e.target.value ? Number(e.target.value) : null)
+                        }
+                        className="w-full mt-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500"
+                      >
+                        <option value="">연결 안 함</option>
+                        {loras.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[10px] text-[#888]">관리자 메모</label>
+                    <textarea
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      rows={3}
+                      placeholder="처리 메모..."
+                      className="w-full mt-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white placeholder-[#444] focus:outline-none focus:border-orange-500 resize-none"
+                    />
+                  </div>
+                  {saveError && <p className="text-red-400 text-[10px]">{saveError}</p>}
+                  <button
+                    onClick={handleAdminSave}
+                    disabled={saving}
+                    className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg cursor-pointer"
+                  >
+                    {saving ? "저장 중..." : "저장"}
+                  </button>
+                </div>
+              ) : (
+                selected.adminNotes && <Row label="관리자 메모" value={selected.adminNotes} />
+              )}
             </div>
           </div>
         )}
