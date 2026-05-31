@@ -1364,6 +1364,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               const lw = selLayer?.imgW ?? 480;
               const lh = selLayer?.imgH ?? 680;
               const count = selectedLayerImgIds.length;
+              const isBgSelected = selLayer?.type === "background";
+              const layerLabel = isBgSelected ? "배경" : "캐릭터";
               const handleCharZoom = (factor: number) => {
                 for (const id of selectedLayerImgIds) {
                   const l = layers.find((l2) => l2.id === id);
@@ -1378,9 +1380,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               };
               return (
               <div className="flex items-center gap-1.5 px-2 h-6 bg-orange-500/10 rounded text-[10px] text-orange-400 whitespace-nowrap shrink-0">
-                <i className="ri-user-line" />
+                <i className={isBgSelected ? "ri-landscape-line" : "ri-user-line"} />
                 {count > 1 ? <span className="text-[9px] bg-orange-500/30 px-1 rounded">{count}개</span> : null}
-                캐릭터: 드래그·휠·핸들로 확대축소/회전
+                {layerLabel}: 드래그·휠·핸들로 확대축소/회전
                 <span className="w-px h-3 bg-[#333] mx-0.5" />
                 <button
                   onClick={() => handleCharZoom(0.9)}
@@ -1510,41 +1512,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               style={{ width: CANVAS_W * scale, height: CANVAS_H * scale, zIndex: 1 }}
             />
 
-            {/* ── 배경 레이어 이미지 (type: background) ── */}
-            {layers.filter((l) => l.type === "background" && l.imageUrl && l.visible).map((layer) => {
-              const layerIdx = layers.findIndex((l) => l.id === layer.id);
-              const layerZ = 2 + layerIdx;
-              return (
-                <div
-                  key={layer.id}
-                  className="absolute top-0 left-0"
-                  style={{
-                    width: CANVAS_W * scale,
-                    height: CANVAS_H * scale,
-                    zIndex: layerZ,
-                    opacity: layer.opacity / 100,
-                  }}
-                >
-                  <img
-                    src={layer.imageUrl}
-                    alt={layer.name}
-                    className="w-full h-full"
-                    style={{ objectFit: "fill", display: "block", userSelect: "none", pointerEvents: "none" }}
-                    draggable={false}
-                  />
-                </div>
-              );
-            })}
-
-            {/* ── 캐릭터 레이어 이미지 (type: character) — 드래그/리사이즈/회전 가능 ── */}
-            {layers.filter((l) => l.type === "character" && l.imageUrl && l.visible && l.imgX !== undefined && l.imgY !== undefined).map((layer) => {
-              const lx = layer.imgX ?? 160;
-              const ly = layer.imgY ?? 210;
-              const lw = layer.imgW ?? 480;
-              const lh = layer.imgH ?? 680;
+            {/* ── 배경 + 캐릭터 레이어 이미지 — 드래그/리사이즈/회전 가능 ── */}
+            {layers.filter((l) => (l.type === "background" || l.type === "character") && l.imageUrl && l.visible && l.imgX !== undefined && l.imgY !== undefined).map((layer) => {
+              const lx = layer.imgX ?? (layer.type === "background" ? 0 : 160);
+              const ly = layer.imgY ?? (layer.type === "background" ? 0 : 210);
+              const lw = layer.imgW ?? (layer.type === "background" ? CANVAS_W : 480);
+              const lh = layer.imgH ?? (layer.type === "background" ? CANVAS_H : 680);
               const rotation = layer.imgRotation ?? 0;
               const isSelected = selectedLayerImgIds.includes(layer.id);
               const isPrimary = isSelected && selectedLayerImgIds[0] === layer.id;
+              const layerTypeLabel = layer.type === "background" ? "배경" : "캐릭터";
               const layerIdx = layers.findIndex((l) => l.id === layer.id);
               const layerZ = 2 + layerIdx;
               return (
@@ -1575,25 +1552,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   />
                   {isSelected && (
                     <>
-                      {/* 모서리 점들 */}
                       <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
                       <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
                       <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-white" />
-                      {/* 리사이즈 핸들 (우하단) */}
                       <div
                         className="absolute -bottom-2 -right-2 w-4 h-4 bg-orange-500 rounded-sm border-2 border-white cursor-nwse-resize flex items-center justify-center"
                         onMouseDown={(e) => { e.stopPropagation(); handleLayerImgResizeMouseDown(e, layer.id); }}
                       >
                         <i className="ri-arrow-right-down-line text-white" style={{ fontSize: 8 }} />
                       </div>
-                      {/* 회전 핸들 (상단 중앙) */}
                       <div
                         className="absolute -top-6 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full border-2 border-white cursor-grab flex items-center justify-center"
                         onMouseDown={(e) => { e.stopPropagation(); handleLayerImgRotateMouseDown(e, layer.id); }}
                       >
                         <i className="ri-loop-right-line text-white" style={{ fontSize: 7 }} />
                       </div>
-                      {/* 정보 라벨 */}
                       {isPrimary && (
                         <div className="absolute -bottom-5 left-0 text-[9px] text-orange-400 whitespace-nowrap bg-[#111]/80 px-1 rounded">
                           {layer.name} · {Math.round(lw)} × {Math.round(lh)}{rotation !== 0 ? ` · ${Math.round(rotation)}°` : ""}
