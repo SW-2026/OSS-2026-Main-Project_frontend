@@ -216,7 +216,7 @@ export function useEditorState(initialProjectId?: string | null) {
   const [promptText, setPromptText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<AIGeneratedImage[]>([]);
-  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number; layerPosition?: number }[]>([]);
+  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number; layerPosition?: number; rotation?: number }[]>([]);
   const canvasImagesRef = useRef(canvasImages);
   useEffect(() => { canvasImagesRef.current = canvasImages; }, [canvasImages]);
 
@@ -748,8 +748,8 @@ export function useEditorState(initialProjectId?: string | null) {
     setSaveStatus("unsaved");
   }, []);
 
-  const updateCanvasImage = useCallback((id: string, x: number, y: number, w: number, h: number) => {
-    setCanvasImages((prev) => prev.map((img) => img.id === id ? { ...img, x, y, w, h } : img));
+  const updateCanvasImage = useCallback((id: string, x: number, y: number, w: number, h: number, rotation?: number) => {
+    setCanvasImages((prev) => prev.map((img) => img.id === id ? { ...img, x, y, w, h, ...(rotation !== undefined ? { rotation } : {}) } : img));
     setSaveStatus("unsaved");
   }, []);
 
