@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
 import type { BalloonItem, BalloonShape } from "./BalloonPanel";
 
 interface BalloonOverlayProps {
@@ -87,6 +87,7 @@ function drawBalloonPath(
     }
     case "thought": {
       const bh = bodyH;
+      // tailDir에 따라 원(버블) 위치 결정
       let bubble1x: number, bubble1y: number, bubble2x: number, bubble2y: number;
       if (tailDir === "bottom-left") {
         bubble1x = r * 2; bubble1y = bh + 5;
@@ -101,6 +102,7 @@ function drawBalloonPath(
         bubble1x = w - r * 2; bubble1y = -5;
         bubble2x = w - r * 1.2; bubble2y = -15;
       } else {
+        // none: 버블 안 그림
         return buildRoundRect(bh);
       }
       return `${buildRoundRect(bh)} M ${bubble1x - 4},${bubble1y} A 4,4 0 1,0 ${bubble1x + 4},${bubble1y} A 4,4 0 1,0 ${bubble1x - 4},${bubble1y} Z M ${bubble2x - 3},${bubble2y} A 3,3 0 1,0 ${bubble2x + 3},${bubble2y} A 3,3 0 1,0 ${bubble2x - 3},${bubble2y} Z`;
@@ -150,36 +152,6 @@ export default function BalloonOverlay({
   const [resizing, setResizing] = useState<{ id: string; startX: number; startY: number; origW: number; origH: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // document-level mousemove/mouseup for dragging (SVG pointer-events 제한 극복)
-  useEffect(() => {
-    if (!dragging && !resizing) return;
-
-    const handleDocMove = (e: MouseEvent) => {
-      if (dragging) {
-        const dx = (e.clientX - dragging.startX) / scale;
-        const dy = (e.clientY - dragging.startY) / scale;
-        onUpdatePosition(dragging.id, dragging.origX + dx, dragging.origY + dy);
-      }
-      if (resizing) {
-        const dx = (e.clientX - resizing.startX) / scale;
-        const dy = (e.clientY - resizing.startY) / scale;
-        onUpdateSize(resizing.id, Math.max(80, resizing.origW + dx), Math.max(40, resizing.origH + dy));
-      }
-    };
-
-    const handleDocUp = () => {
-      setDragging(null);
-      setResizing(null);
-    };
-
-    document.addEventListener("mousemove", handleDocMove);
-    document.addEventListener("mouseup", handleDocUp);
-    return () => {
-      document.removeEventListener("mousemove", handleDocMove);
-      document.removeEventListener("mouseup", handleDocUp);
-    };
-  }, [dragging, resizing, scale, onUpdatePosition, onUpdateSize]);
-
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       if (activeTool !== "balloon") return;
@@ -212,6 +184,27 @@ export default function BalloonOverlay({
     },
     [activeTool, editing, onSelect]
   );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (dragging) {
+        const dx = (e.clientX - dragging.startX) / scale;
+        const dy = (e.clientY - dragging.startY) / scale;
+        onUpdatePosition(dragging.id, dragging.origX + dx, dragging.origY + dy);
+      }
+      if (resizing) {
+        const dx = (e.clientX - resizing.startX) / scale;
+        const dy = (e.clientY - resizing.startY) / scale;
+        onUpdateSize(resizing.id, Math.max(80, resizing.origW + dx), Math.max(40, resizing.origH + dy));
+      }
+    },
+    [dragging, resizing, onUpdatePosition, onUpdateSize, scale]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setDragging(null);
+    setResizing(null);
+  }, []);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent, balloon: BalloonItem) => {
@@ -252,12 +245,13 @@ export default function BalloonOverlay({
         width: 800,
         height: 1100,
         transform: `scale(${scale})`,
-        // SVG 전체는 pointer-events none → 말풍선 요소만 auto
-        // balloon 모드에서만 overlay click(새 말풍선 생성) 허용
-        pointerEvents: "none",
+        pointerEvents: isBalloonInteractive ? "all" : "none",
         cursor: activeTool === "balloon" ? "crosshair" : "default",
       }}
       onClick={handleOverlayClick}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
     >
       {balloons.map((balloon) => {
         const isSelected = selectedBalloonId === balloon.id;
@@ -266,16 +260,12 @@ export default function BalloonOverlay({
         const bodyH = balloon.height - tailSize;
         const pathD = drawBalloonPath(balloon.shape, balloon.width, balloon.height, balloon.tailDir);
         const isDashed = balloon.shape === "whisper";
-        const canInteract = isBalloonInteractive;
 
         return (
           <g
             key={balloon.id}
             transform={`translate(${balloon.x}, ${balloon.y})`}
-            style={{
-              cursor: isEditingThis ? "text" : canInteract ? "move" : "default",
-              pointerEvents: canInteract ? "auto" : "none",
-            }}
+            style={{ cursor: isEditingThis ? "text" : "move" }}
             onMouseDown={(e) => handleBalloonMouseDown(e, balloon)}
             onDoubleClick={(e) => handleDoubleClick(e, balloon)}
           >
@@ -349,7 +339,7 @@ export default function BalloonOverlay({
               </foreignObject>
             )}
 
-            {/* X/T 버튼 - 선택 시 항상 표시 */}
+            {/* X/T 버튼 - 선택 시 항상 표시 (편집 중에도 보이게) */}
             {isSelected && (
               <>
                 {/* 삭제 버튼 */}

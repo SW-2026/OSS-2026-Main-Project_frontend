@@ -9,6 +9,8 @@ import ImagePanel from "./ImagePanel";
 import type { AIGeneratedImage } from "./ImagePanel";
 import AiTab from "./AiTab";
 import BackgroundLibraryPanel from "./BackgroundLibraryPanel";
+import LoraRequestModal from "./LoraRequestModal";
+import LoraRequestHistoryModal from "./LoraRequestHistoryModal";
 
 type TabType = "tool" | "library" | "image" | "balloon" | "ai" | "background";
 
@@ -113,6 +115,11 @@ export default function LeftPanel({
   const [activeTab, setActiveTab] = useState<TabType>("tool");
   const [selectedBrushPreset, setSelectedBrushPreset] = useState(0);
 
+  // LoRA 신청/내역 모달
+  const [showLoraRequest, setShowLoraRequest] = useState(false);
+  const [showLoraHistory, setShowLoraHistory] = useState(false);
+  const [loraHistoryRefreshKey, setLoraHistoryRefreshKey] = useState(0);
+
   // 세로 툴바에서 툴 바뀌면 프리셋도 자동 동기화
   useEffect(() => {
     // 현재 선택된 프리셋이 이미 activeTool과 같은 타입이면 건너뜀
@@ -207,6 +214,7 @@ export default function LeftPanel({
   };
 
   return (
+    <>
     <aside className="w-64 bg-[#151515] border-r border-[#2a2a2a] flex flex-col shrink-0 overflow-hidden">
       {/* 탭 */}
       <div className="flex border-b border-[#2a2a2a] shrink-0">
@@ -371,6 +379,21 @@ export default function LeftPanel({
               <input value={librarySearch} onChange={(e) => setLibrarySearch(e.target.value)} placeholder="소재 검색..." className="w-full h-8 bg-[#1e1e1e] border border-[#2a2a2a] rounded-lg pl-8 pr-3 text-xs text-[#ccc] placeholder-[#444] outline-none focus:border-orange-500/50" />
             </div>
           </div>
+          {/* LoRA 신청 / 내역 */}
+          <div className="flex gap-1.5 px-3 pb-2 shrink-0">
+            <button
+              onClick={() => setShowLoraRequest(true)}
+              className="flex-1 flex items-center justify-center gap-1 h-7 rounded-lg bg-orange-500/15 border border-orange-500/30 text-orange-400 text-[10px] hover:bg-orange-500/25 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <i className="ri-add-line" /> LoRA 신청
+            </button>
+            <button
+              onClick={() => setShowLoraHistory(true)}
+              className="flex-1 flex items-center justify-center gap-1 h-7 rounded-lg bg-[#222] border border-[#2a2a2a] text-[#aaa] text-[10px] hover:bg-[#2a2a2a] transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <i className="ri-history-line" /> 내 신청 내역
+            </button>
+          </div>
           <div className="flex gap-1 px-3 pb-2 shrink-0">
             {(["전체", "캐릭터", "배경"] as const).map((f) => (
               <button key={f} onClick={() => setLibraryFilter(f)} className={`px-2.5 py-1 rounded-full text-[10px] transition-colors cursor-pointer whitespace-nowrap ${libraryFilter === f ? "bg-orange-500 text-white" : "bg-[#222] text-[#888] hover:bg-[#2a2a2a]"}`}>{f}</button>
@@ -459,5 +482,17 @@ export default function LeftPanel({
       {/* 배경 라이브러리 탭 — backend background-assets API */}
       {activeTab === "background" && <BackgroundLibraryPanel />}
     </aside>
+
+    <LoraRequestModal
+      isOpen={showLoraRequest}
+      onClose={() => setShowLoraRequest(false)}
+      onCreated={() => setLoraHistoryRefreshKey((k) => k + 1)}
+    />
+    <LoraRequestHistoryModal
+      isOpen={showLoraHistory}
+      onClose={() => setShowLoraHistory(false)}
+      refreshKey={loraHistoryRefreshKey}
+    />
+    </>
   );
 }

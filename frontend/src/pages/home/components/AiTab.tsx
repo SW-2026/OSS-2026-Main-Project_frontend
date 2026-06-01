@@ -4,7 +4,6 @@ import OneCutPanel from "./OneCutPanel";
 import type { CharacterModelDetail } from "@/lib/characterApi";
 
 // AI 탭 래퍼 — [다컷/1컷] 서브탭. 다컷은 ScenarioGeneratePanel 그대로(무손상), 1컷은 OneCutPanel.
-// props는 LeftPanel → 본 래퍼 → ScenarioGeneratePanel로 그대로 포워딩 (소재 탭 auto-push 유지)
 interface AiTabProps {
   projectId: string | null;
   episodeId: string;
@@ -46,7 +45,6 @@ export default function AiTab({ onSingleCutComplete, ...scenarioProps }: AiTabPr
         ))}
       </div>
 
-      {/* 다컷은 항상 마운트 유지(상태 보존), 1컷일 때만 숨김 */}
       {sub === "multi" ? (
         <ScenarioGeneratePanel {...scenarioProps} />
       ) : (
