@@ -386,13 +386,11 @@ export function useEditorState(initialProjectId?: string | null) {
 
       if (!data) {
         // cut-data 없음 → defaultLayers 리셋 + cut의 character/background Asset URL을 Layer.imageUrl로 매핑
-        // backgroundAssetUrl이 없으면 thumbnail(finalImageUrl)을 배경 레이어 이미지로 fallback
         const cut = cutsRef.current.find((c) => c.id === cutId);
         if (cut) {
-          const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
           const baseLayers: Layer[] = defaultLayers.map((l) =>
-            l.type === "background" && bgUrl
-              ? { ...l, imageUrl: bgUrl }
+            l.type === "background" && cut.backgroundAssetUrl
+              ? { ...l, imageUrl: cut.backgroundAssetUrl }
               : { ...l }
           );
           if (cut.characterAssetUrl) {
@@ -450,16 +448,13 @@ export function useEditorState(initialProjectId?: string | null) {
     if (!cut) return;
 
     setLayers((prev) => prev.map((l) => {
-      if (l.type === "background") {
-        const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
-        if (bgUrl) {
-          const url = resolveImageUrl(bgUrl);
-          const needsDefault = l.imgX == null || l.imgY == null;
-          if (needsDefault && url) {
-            return { ...l, imageUrl: url, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 };
-          }
-          return { ...l, imageUrl: url ?? undefined };
+      if (l.type === "background" && cut.backgroundAssetUrl) {
+        const url = resolveImageUrl(cut.backgroundAssetUrl);
+        const needsDefault = l.imgX == null || l.imgY == null;
+        if (needsDefault && url) {
+          return { ...l, imageUrl: url, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 };
         }
+        return { ...l, imageUrl: url ?? undefined };
       }
       if (l.type === "character" && cut.characterAssetUrl) {
         const url = resolveImageUrl(cut.characterAssetUrl);
