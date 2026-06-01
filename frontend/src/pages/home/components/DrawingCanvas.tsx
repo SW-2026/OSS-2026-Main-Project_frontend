@@ -1284,12 +1284,22 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setIsPinching(false);
     }, []);
 
+    // 이미지 선택 시 캔버스 커서를 강제로 grabbing 유지 (React state 타이밍 이슈 방지)
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const hasSelectedImage = selectedImgId !== null || selectedLayerImgIds.length > 0;
+      if (hasSelectedImage) {
+        canvas.style.cursor = "grabbing";
+      }
+    }, [selectedImgId, selectedLayerImgIds]);
+
     const getCursor = () => {
       if (isDraggingImg || isDraggingLayerImg) return "grabbing";
       if (isResizingImg || isResizingLayerImg) return "nwse-resize";
       if (isRotatingImg || isRotatingLayerImg) return "grabbing";
       if (isMovingStrokes) return "grabbing";
-      if (selectedImgId) return "grabbing";
+      if (selectedImgId || selectedLayerImgIds.length > 0) return "grabbing";
       if (activeTool === "stroke-select") return "default";
       if (activeTool === "stroke-eraser") return "crosshair";
       if (activeTool === "balloon") return "crosshair";
