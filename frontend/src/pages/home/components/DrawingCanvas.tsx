@@ -13,6 +13,7 @@ interface CanvasImageLayer {
   y: number;
   w: number;
   h: number;
+  rotation?: number;
   layerPosition?: number;
 }
 
@@ -27,7 +28,7 @@ interface DrawingCanvasProps {
   onZoomOut: () => void;
   onResetZoom: () => void;
   canvasImages?: CanvasImageLayer[];
-  onUpdateCanvasImage?: (id: string, x: number, y: number, w: number, h: number) => void;
+  onUpdateCanvasImage?: (id: string, x: number, y: number, w: number, h: number, rotation?: number) => void;
   onDeleteCanvasImage?: (id: string) => void;
   onUpdateCanvasImageLayerPosition?: (id: string, direction: "up" | "down") => void;
   // stroke props
@@ -279,9 +280,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // 이미지 레이어 선택/드래그/리사이즈 상태
     const [selectedImgId, setSelectedImgId] = useState<string | null>(null);
     const imgDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-    const imgResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number } | null>(null);
+    const imgResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number; aspectRatio: number } | null>(null);
+    const imgRotateRef = useRef<{ startX: number; startY: number; origRotation: number; centerX: number; centerY: number } | null>(null);
     const [isDraggingImg, setIsDraggingImg] = useState(false);
     const [isResizingImg, setIsResizingImg] = useState(false);
+    const [isRotatingImg, setIsRotatingImg] = useState(false);
 
     // 캐릭터/배경 레이어 이미지 선택/드래그/리사이즈 상태
     const [selectedLayerImgIds, setSelectedLayerImgIds] = useState<string[]>([]);
@@ -333,6 +336,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         for (const layer of layers) {
           if (!layer.imageUrl || !layer.visible) continue;
           if (layer.type !== "background" && layer.type !== "character") continue;
+          const layerIdx = layers.findIndex((l) => l.id === layer.id);
           await new Promise<void>((resolve) => {
             const img = new Image();
             img.crossOrigin = "anonymous";
@@ -353,17 +357,25 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             img.src = layer.imageUrl!;
           });
 
-          // 해당 레이어 위치에 들어가야 할 AI 이미지들 렌더링
-          const layerIdx = layers.findIndex((l) => l.id === layer.id);
-          const imagesAtThisLevel = canvasImages.filter(
+          // 해당 레이어 위치에 들어가야 할 AI 이미지들 렌더링 (rotation 지원)
+          const displayImages = canvasImages.filter(
             (ci) => (ci.layerPosition ?? layers.length) === layerIdx
           );
-          for (const cimg of imagesAtThisLevel) {
+          for (const cimg of displayImages) {
             await new Promise<void>((resolve) => {
               const el = new Image();
               el.crossOrigin = "anonymous";
               el.onload = () => {
+                ctx.save();
+                if (cimg.rotation && cimg.rotation !== 0) {
+                  const cx = cimg.x + cimg.w / 2;
+                  const cy = cimg.y + cimg.h / 2;
+                  ctx.translate(cx, cy);
+                  ctx.rotate((cimg.rotation * Math.PI) / 180);
+                  ctx.translate(-cx, -cy);
+                }
                 ctx.drawImage(el, cimg.x, cimg.y, cimg.w, cimg.h);
+                ctx.restore();
                 resolve();
               };
               el.onerror = () => resolve();
@@ -372,7 +384,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           }
         }
 
-        // 2. 나머지 AI 이미지들 (layerPosition >= layers.length 인 것들)
+        // 2. 나머지 AI 이미지들 (layerPosition >= layers.length 인 것들, rotation 지원)
         const remainingImages = canvasImages.filter(
           (ci) => (ci.layerPosition ?? layers.length) >= layers.length
         );
@@ -382,7 +394,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               const el = new Image();
               el.crossOrigin = "anonymous";
               el.onload = () => {
+                ctx.save();
+                if (img.rotation && img.rotation !== 0) {
+                  const cx = img.x + img.w / 2;
+                  const cy = img.y + img.h / 2;
+                  ctx.translate(cx, cy);
+                  ctx.rotate((img.rotation * Math.PI) / 180);
+                  ctx.translate(-cx, -cy);
+                }
                 ctx.drawImage(el, img.x, img.y, img.w, img.h);
+                ctx.restore();
                 resolve();
               };
               el.onerror = () => resolve();
@@ -924,6 +945,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handleImgMouseDown = useCallback(
       (e: React.MouseEvent, imgId: string) => {
         e.stopPropagation();
+        e.preventDefault();
         setSelectedImgId(imgId);
         const img = canvasImages.find((i) => i.id === imgId);
         if (!img) return;
@@ -938,10 +960,23 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         e.stopPropagation();
         const img = canvasImages.find((i) => i.id === imgId);
         if (!img) return;
-        imgResizeRef.current = { startX: e.clientX, startY: e.clientY, origW: img.w, origH: img.h, origX: img.x, origY: img.y };
+        imgResizeRef.current = { startX: e.clientX, startY: e.clientY, origW: img.w, origH: img.h, origX: img.x, origY: img.y, aspectRatio: img.w / img.h };
         setIsResizingImg(true);
       },
       [canvasImages]
+    );
+
+    const handleImgRotateMouseDown = useCallback(
+      (e: React.MouseEvent, imgId: string) => {
+        e.stopPropagation();
+        const img = canvasImages.find((i) => i.id === imgId);
+        if (!img) return;
+        const cx = (img.x + img.w / 2) * scale;
+        const cy = (img.y + img.h / 2) * scale;
+        imgRotateRef.current = { startX: e.clientX, startY: e.clientY, origRotation: img.rotation ?? 0, centerX: cx, centerY: cy };
+        setIsRotatingImg(true);
+      },
+      [canvasImages, scale]
     );
 
     const handleImgMouseMove = useCallback(
@@ -958,21 +993,42 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           );
         }
         if (isResizingImg && imgResizeRef.current && selectedImgId) {
-          const dx = (e.clientX - imgResizeRef.current.startX) / scale;
-          const dy = (e.clientY - imgResizeRef.current.startY) / scale;
-          const newW = Math.max(50, imgResizeRef.current.origW + dx);
-          const newH = Math.max(50, imgResizeRef.current.origH + dy);
-          onUpdateCanvasImage?.(selectedImgId, imgResizeRef.current.origX, imgResizeRef.current.origY, newW, newH);
+          const { startX, startY, origW, origH, origX, origY, aspectRatio } = imgResizeRef.current;
+          const dx = (e.clientX - startX) / scale;
+          const dy = (e.clientY - startY) / scale;
+          const useDx = Math.abs(dx) >= Math.abs(dy);
+          let newW: number, newH: number, newX: number, newY: number;
+          if (useDx) {
+            newW = Math.max(50, origW + dx);
+            newH = newW / aspectRatio;
+          } else {
+            newH = Math.max(50, origH + dy);
+            newW = newH * aspectRatio;
+          }
+          const clamped = clampToCanvas(origX, origY, newW, newH);
+          onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
+        }
+        if (isRotatingImg && imgRotateRef.current && selectedImgId) {
+          const { startX, startY, centerX, centerY, origRotation } = imgRotateRef.current;
+          const startAngle = Math.atan2(startY - centerY, startX - centerX);
+          const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+          const deltaDeg = ((currentAngle - startAngle) * 180) / Math.PI;
+          let newRotation = origRotation + deltaDeg;
+          newRotation = ((newRotation % 360) + 360) % 360;
+          const img = canvasImages.find((i) => i.id === selectedImgId);
+          onUpdateCanvasImage?.(selectedImgId, img?.x ?? 0, img?.y ?? 0, img?.w ?? 400, img?.h ?? 400, newRotation);
         }
       },
-      [isDraggingImg, isResizingImg, selectedImgId, scale, canvasImages, onUpdateCanvasImage]
+      [isDraggingImg, isResizingImg, isRotatingImg, selectedImgId, scale, canvasImages, onUpdateCanvasImage]
     );
 
     const handleImgMouseUp = useCallback(() => {
       setIsDraggingImg(false);
       setIsResizingImg(false);
+      setIsRotatingImg(false);
       imgDragRef.current = null;
       imgResizeRef.current = null;
+      imgRotateRef.current = null;
     }, []);
 
     // ── 레이어 이미지(캐릭터/배경) 핸들러 ──
@@ -1130,9 +1186,26 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setTextValue("");
     }, [textInput, textValue, brushSize, foregroundColor, opacity]);
 
-    // 마우스 휠로 캐릭터 레이어 이미지 확대/축소
+    // 마우스 휠로 선택된 이미지 확대/축소 (캐릭터/배경 레이어 + AI 이미지)
     const handleWheel = useCallback(
       (e: React.WheelEvent) => {
+        // AI 캔버스 이미지 줌
+        if (selectedImgId) {
+          e.preventDefault();
+          const img = canvasImages.find((i) => i.id === selectedImgId);
+          if (!img) return;
+          const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+          const newW = Math.max(50, Math.min(2000, img.w * zoomFactor));
+          const newH = Math.max(50, Math.min(2000, img.h * zoomFactor));
+          const dw = newW - img.w;
+          const dh = newH - img.h;
+          const newX = img.x - dw / 2;
+          const newY = img.y - dh / 2;
+          const clamped = clampToCanvas(newX, newY, newW, newH);
+          onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
+          return;
+        }
+
         if (selectedLayerImgIds.length === 0) return;
 
         e.preventDefault();
@@ -1155,8 +1228,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       },
       [selectedLayerImgIds, layers, onUpdateLayerImage]
     );
-
-    const isBalloonInteractive = activeTool === "balloon" || activeTool === "select" || activeTool === "move";
 
     // ── 핀치 투 줌 핸들러 ──
     const getTouchDistance = (touches: React.TouchList): number => {
@@ -1202,7 +1273,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const getCursor = () => {
       if (isDraggingImg || isDraggingLayerImg) return "grabbing";
       if (isResizingImg || isResizingLayerImg) return "nwse-resize";
-      if (isRotatingLayerImg) return "grabbing";
+      if (isRotatingImg || isRotatingLayerImg) return "grabbing";
       if (isMovingStrokes) return "grabbing";
       if (activeTool === "stroke-select") return "default";
       if (activeTool === "stroke-eraser") return "crosshair";
@@ -1330,9 +1401,52 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             )}
 
             {selectedImgId && (
+              (() => {
+                const selImg = canvasImages.find((i) => i.id === selectedImgId);
+                const iw = selImg?.w ?? 400;
+                const ih = selImg?.h ?? 400;
+                const irot = selImg?.rotation ?? 0;
+                const handleImgZoom = (factor: number) => {
+                  if (!selImg) return;
+                  const newW = Math.max(50, Math.min(2000, selImg.w * factor));
+                  const newH = Math.max(50, Math.min(2000, selImg.h * factor));
+                  const dw = newW - selImg.w;
+                  const dh = newH - selImg.h;
+                  const clamped = clampToCanvas(selImg.x - dw / 2, selImg.y - dh / 2, newW, newH);
+                  onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
+                };
+                return (
               <div className="flex items-center gap-1.5 px-2 h-6 bg-orange-500/10 rounded text-[10px] text-orange-400 whitespace-nowrap shrink-0">
                 <i className="ri-image-line" />
-                드래그: 이동 · 우하단 핸들: 크기조절
+                AI 이미지: 드래그·휠·핸들로 확대축소/회전
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
+                <button
+                  onClick={() => handleImgZoom(0.9)}
+                  title="축소"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-zoom-out-line" />
+                </button>
+                <span className="text-[9px] text-[#ccc] font-mono">{Math.round(iw)}×{Math.round(ih)}</span>
+                <button
+                  onClick={() => handleImgZoom(1.1)}
+                  title="확대"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-zoom-in-line" />
+                </button>
+                <span className="w-px h-3 bg-[#333] mx-0.5" />
+                <button
+                  onClick={() => {
+                    if (!selImg) return;
+                    const newRot = ((irot + 15) % 360);
+                    onUpdateCanvasImage?.(selectedImgId, selImg.x, selImg.y, selImg.w, selImg.h, newRot);
+                  }}
+                  title="15° 회전"
+                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
+                >
+                  <i className="ri-loop-right-line" />
+                </button>
                 <span className="w-px h-3 bg-[#333] mx-0.5" />
                 <button
                   onClick={() => onUpdateCanvasImageLayerPosition?.(selectedImgId, "up")}
@@ -1357,6 +1471,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   <i className="ri-delete-bin-line" /> 삭제
                 </button>
               </div>
+                );
+              })()
             )}
 
             {selectedLayerImgIds.length > 0 && (() => {
@@ -1504,7 +1620,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
               boxShadow: "0 0 0 1px #333, 0 8px 40px rgba(0,0,0,0.8)",
             }}
-            onClick={() => { setSelectedImgId(null); setSelectedLayerImgIds([]); }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) { setSelectedImgId(null); setSelectedLayerImgIds([]); } }}
           >
             {/* ── 흰 배경 레이어 (맨 아래) ── */}
             <div
@@ -1582,6 +1698,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             {canvasImages.map((img) => {
               const isSelected = selectedImgId === img.id;
               const canvasImgZ = 2 + (img.layerPosition ?? layers.length);
+              const rotation = img.rotation ?? 0;
               return (
                 <div
                   key={img.id}
@@ -1593,8 +1710,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                     height: img.h * scale,
                     zIndex: canvasImgZ,
                     outline: isSelected ? "2px solid #f97316" : "none",
+                    outlineOffset: "1px",
                     cursor: isDraggingImg && isSelected ? "grabbing" : "grab",
+                    transformOrigin: "center center",
+                    transform: rotation !== 0 ? `rotate(${rotation}deg)` : "none",
                   }}
+                  onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
                   onMouseDown={(e) => handleImgMouseDown(e, img.id)}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -1616,15 +1737,22 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                       >
                         <i className="ri-arrow-right-down-line text-white" style={{ fontSize: 8 }} />
                       </div>
+                      <div
+                        className="absolute -top-6 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full border-2 border-white cursor-grab flex items-center justify-center"
+                        onMouseDown={(e) => { e.stopPropagation(); handleImgRotateMouseDown(e, img.id); }}
+                      >
+                        <i className="ri-loop-right-line text-white" style={{ fontSize: 7 }} />
+                      </div>
                       <button
-                        className="absolute -top-3 -right-3 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center cursor-pointer z-10"
+                        className="absolute -top-3 -right-3 w-6 h-6 bg-red-500 rounded-full border-2 border-white shadow-lg shadow-black/40 flex items-center justify-center cursor-pointer z-10 hover:bg-red-600 hover:scale-110 transition-all"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => { e.stopPropagation(); onDeleteCanvasImage?.(img.id); setSelectedImgId(null); }}
+                        title="이미지 삭제"
                       >
-                        <i className="ri-close-line text-white" style={{ fontSize: 9 }} />
+                        <i className="ri-close-line text-white font-bold" style={{ fontSize: 12 }} />
                       </button>
                       <div className="absolute -bottom-5 left-0 text-[9px] text-orange-400 whitespace-nowrap bg-[#111]/80 px-1 rounded">
-                        {Math.round(img.w)} × {Math.round(img.h)}
+                        {Math.round(img.w)} × {Math.round(img.h)}{rotation !== 0 ? ` · ${Math.round(rotation)}°` : ""}
                       </div>
                     </>
                   )}
@@ -1649,6 +1777,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 zIndex: strokeBaseZ,
                 background: "transparent",
                 touchAction: "none",
+                pointerEvents: (activeTool === "select" || activeTool === "move") ? "none" : "auto",
               }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
@@ -1738,11 +1867,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             {(() => {
               const selectedLayerIndex = layers.findIndex(l => l.id === selectedLayerId);
               const strokeBaseZ = selectedLayerIndex >= 0 ? 2 + selectedLayerIndex : 5 + layers.length;
-              // 숨겨진 레이어의 말풍선은 제외하고 전달
               const visibleLayerIds = new Set(layers.filter(l => l.visible).map(l => l.id));
               const visibleBalloons = balloons.filter(b => visibleLayerIds.has(b.layerId));
               return (
-            <div style={{ zIndex: strokeBaseZ + 3, position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: activeTool === "balloon" || activeTool === "select" || activeTool === "move" ? "auto" : "none" }}>
+            <div style={{ zIndex: strokeBaseZ + 3, position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
               <BalloonOverlay
                 balloons={visibleBalloons}
                 selectedBalloonId={selectedBalloonId}

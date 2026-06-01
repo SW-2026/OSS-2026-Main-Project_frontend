@@ -145,6 +145,7 @@ export function usePanelGeneration() {
 
       try {
         const { taskId } = await generateSinglePanel(episodeId, body);
+
         if (!taskId) {
           setState((prev) => ({
             ...prev,

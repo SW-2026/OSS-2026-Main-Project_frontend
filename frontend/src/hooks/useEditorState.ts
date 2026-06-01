@@ -216,7 +216,7 @@ export function useEditorState(initialProjectId?: string | null) {
   const [promptText, setPromptText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<AIGeneratedImage[]>([]);
-  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number; layerPosition?: number }[]>([]);
+  const [canvasImages, setCanvasImages] = useState<{ id: string; url: string; x: number; y: number; w: number; h: number; rotation?: number; layerPosition?: number }[]>([]);
   const canvasImagesRef = useRef(canvasImages);
   useEffect(() => { canvasImagesRef.current = canvasImages; }, [canvasImages]);
 
@@ -367,7 +367,7 @@ export function useEditorState(initialProjectId?: string | null) {
 
   // 컷 데이터 로드 — cutEditorData API → localStorage fallback (B0 cutover)
   const loadCutData = async (cutId: string) => {
-    if (!cutId || savingRef.current) return;
+    if (!cutId || (savingRef.current && activeCutIdRef.current === cutId)) return;
     try {
       let data: any = null;
 
@@ -382,6 +382,11 @@ export function useEditorState(initialProjectId?: string | null) {
           // eslint-disable-next-line no-console
           console.error("[loadCutData] cutEditorData API 로드 실패 → localStorage fallback:", apiErr);
         }
+      }
+
+      // fallback: localStorage에서도 로드 시도
+      if (!data) {
+        data = loadCutDataFromLocal(cutId);
       }
 
       if (!data) {
@@ -707,7 +712,7 @@ export function useEditorState(initialProjectId?: string | null) {
   const handleApplyImageToCanvas = useCallback((img: AIGeneratedImage) => {
     setCanvasImages((prev) => [
       ...prev,
-      { id: `cimg-${Date.now()}`, url: img.url, x: 50, y: 50, w: 400, h: 400, layerPosition: layers.length },
+      { id: `cimg-${Date.now()}`, url: img.url, x: 50, y: 50, w: 400, h: 400, rotation: 0, layerPosition: layers.length },
     ]);
     setSaveStatus("unsaved");
   }, [layers.length]);
@@ -715,13 +720,13 @@ export function useEditorState(initialProjectId?: string | null) {
   const addCanvasImage = useCallback((url: string, x: number, y: number, w: number, h: number) => {
     setCanvasImages((prev) => [
       ...prev,
-      { id: `cimg-${Date.now()}`, url, x, y, w, h, layerPosition: layersRef.current.length },
+      { id: `cimg-${Date.now()}`, url, x, y, w, h, rotation: 0, layerPosition: layersRef.current.length },
     ]);
     setSaveStatus("unsaved");
   }, []);
 
-  const updateCanvasImage = useCallback((id: string, x: number, y: number, w: number, h: number) => {
-    setCanvasImages((prev) => prev.map((img) => img.id === id ? { ...img, x, y, w, h } : img));
+  const updateCanvasImage = useCallback((id: string, x: number, y: number, w: number, h: number, rotation?: number) => {
+    setCanvasImages((prev) => prev.map((img) => img.id === id ? { ...img, x, y, w, h, ...(rotation !== undefined ? { rotation } : {}) } : img));
     setSaveStatus("unsaved");
   }, []);
 
@@ -764,7 +769,7 @@ export function useEditorState(initialProjectId?: string | null) {
         layers: currentLayers,
       };
 
-      const panelId = Number(activeCutId);
+      const panelId = Number(cutId);
       if (!Number.isNaN(panelId)) {
         try {
           // cutEditorData API로 저장 (B0 cutover)
@@ -772,11 +777,12 @@ export function useEditorState(initialProjectId?: string | null) {
         } catch (apiErr) {
           // eslint-disable-next-line no-console
           console.error("[handleSave] cutEditorData API 저장 실패 → localStorage fallback:", apiErr);
-          saveCutDataToLocal(activeCutId, payload);
         }
+        // 백엔드 저장 성공 여부와 관계없이 localStorage에도 백업
+        saveCutDataToLocal(cutId, payload);
       } else {
         // 데모 cut(`cut-...`) — backend에 없는 cutId → localStorage
-        saveCutDataToLocal(activeCutId, payload);
+        saveCutDataToLocal(cutId, payload);
       }
 
       setSaveStatus("saved");

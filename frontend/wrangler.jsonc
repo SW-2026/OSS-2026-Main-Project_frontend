@@ -1,9 +1,0 @@
-{
-  // Cloudflare Workers (정적 assets 전용) — `wrangler versions upload` 가 이 설정을 사용
-  "name": "wit-frontend",
-  "compatibility_date": "2026-05-31",
-  "assets": {
-    "directory": "./out",
-    "not_found_handling": "single-page-application"
-  }
-}
