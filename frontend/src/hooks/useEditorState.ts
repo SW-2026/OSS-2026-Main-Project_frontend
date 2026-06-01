@@ -386,11 +386,13 @@ export function useEditorState(initialProjectId?: string | null) {
 
       if (!data) {
         // cut-data 없음 → defaultLayers 리셋 + cut의 character/background Asset URL을 Layer.imageUrl로 매핑
+        // backgroundAssetUrl이 없으면 thumbnail(finalImageUrl)을 배경 레이어 이미지로 fallback
         const cut = cutsRef.current.find((c) => c.id === cutId);
         if (cut) {
+          const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
           const baseLayers: Layer[] = defaultLayers.map((l) =>
-            l.type === "background" && cut.backgroundAssetUrl
-              ? { ...l, imageUrl: cut.backgroundAssetUrl }
+            l.type === "background" && bgUrl
+              ? { ...l, imageUrl: bgUrl, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 }
               : { ...l }
           );
           if (cut.characterAssetUrl) {
@@ -403,6 +405,10 @@ export function useEditorState(initialProjectId?: string | null) {
               opacity: 100,
               blendMode: "normal",
               imageUrl: cut.characterAssetUrl,
+              imgX: 160,
+              imgY: 210,
+              imgW: 480,
+              imgH: 680,
             });
           }
           setLayers(baseLayers);
@@ -426,7 +432,26 @@ export function useEditorState(initialProjectId?: string | null) {
         setCanvasImages(Array.isArray(data.canvas_images) ? data.canvas_images : []);
       }
       if (data.layers) {
-        setLayers(Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : defaultLayers);
+        // 저장된 레이어에 cut의 thumbnail/asset URL을 병합 (loadCutData가 layer sync effect 결과를 덮어쓰는 race condition 방지)
+        const cut = cutsRef.current.find((c) => c.id === cutId);
+        let loadedLayers: Layer[] = Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : defaultLayers;
+        if (cut) {
+          loadedLayers = loadedLayers.map((l: Layer) => {
+            if (l.type === "background") {
+              const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
+              if (bgUrl && !l.imageUrl) {
+                const url = resolveImageUrl(bgUrl) ?? undefined;
+                return { ...l, imageUrl: url, imgX: l.imgX ?? 0, imgY: l.imgY ?? 0, imgW: l.imgW ?? 800, imgH: l.imgH ?? 1100 };
+              }
+            }
+            if (l.type === "character" && cut.characterAssetUrl && !l.imageUrl) {
+              const url = resolveImageUrl(cut.characterAssetUrl) ?? undefined;
+              return { ...l, imageUrl: url, imgX: l.imgX ?? 160, imgY: l.imgY ?? 210, imgW: l.imgW ?? 480, imgH: l.imgH ?? 680 };
+            }
+            return l;
+          });
+        }
+        setLayers(loadedLayers);
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -448,13 +473,16 @@ export function useEditorState(initialProjectId?: string | null) {
     if (!cut) return;
 
     setLayers((prev) => prev.map((l) => {
-      if (l.type === "background" && cut.backgroundAssetUrl) {
-        const url = resolveImageUrl(cut.backgroundAssetUrl);
-        const needsDefault = l.imgX == null || l.imgY == null;
-        if (needsDefault && url) {
-          return { ...l, imageUrl: url, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 };
+      if (l.type === "background") {
+        const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
+        if (bgUrl) {
+          const url = resolveImageUrl(bgUrl);
+          const needsDefault = l.imgX == null || l.imgY == null;
+          if (needsDefault && url) {
+            return { ...l, imageUrl: url, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 };
+          }
+          return { ...l, imageUrl: url ?? undefined };
         }
-        return { ...l, imageUrl: url ?? undefined };
       }
       if (l.type === "character" && cut.characterAssetUrl) {
         const url = resolveImageUrl(cut.characterAssetUrl);
