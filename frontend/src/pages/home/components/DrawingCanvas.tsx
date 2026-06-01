@@ -1289,6 +1289,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       if (isResizingImg || isResizingLayerImg) return "nwse-resize";
       if (isRotatingImg || isRotatingLayerImg) return "grabbing";
       if (isMovingStrokes) return "grabbing";
+      if (selectedImgId) return "grabbing";
       if (activeTool === "stroke-select") return "default";
       if (activeTool === "stroke-eraser") return "crosshair";
       if (activeTool === "balloon") return "crosshair";
@@ -1723,7 +1724,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                     zIndex: canvasImgZ,
                     outline: isSelected ? "2px solid #f97316" : "none",
                     outlineOffset: "1px",
-                    cursor: isDraggingImg && isSelected ? "grabbing" : "grab",
+                    cursor: isSelected ? "grabbing" : "grab",
                     transformOrigin: "center center",
                     transform: imgRotation !== 0 ? `rotate(${imgRotation}deg)` : "none",
                   }}
