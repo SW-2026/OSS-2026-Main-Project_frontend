@@ -335,6 +335,29 @@ export function useEditorState(initialProjectId?: string | null) {
           setActiveEpisodeId(firstEpId);
           setActiveCutId(firstCut?.id ?? "");
 
+          // 프로젝트 로드 시 이미 생성된 컷들도 선화 편집 탭(generatedImages)에 자동 등록
+          const completedCuts = loadedCuts.filter((c) => c.isGenerated && c.thumbnail);
+          if (completedCuts.length > 0) {
+            const existingUrls = new Set<string>();
+            const initImages: AIGeneratedImage[] = [];
+            for (const cut of completedCuts) {
+              const url = cut.thumbnail;
+              if (url && !existingUrls.has(url)) {
+                existingUrls.add(url);
+                initImages.push({
+                  id: `ai-cut-${cut.id}`,
+                  url,
+                  prompt: cut.prompt || cut.label,
+                  type: "generated",
+                  timestamp: Date.now(),
+                });
+              }
+            }
+            if (initImages.length > 0) {
+              setGeneratedImages(initImages);
+            }
+          }
+
           // 첫 컷 데이터 로드
           if (firstCut) {
             await loadCutData(firstCut.id);
@@ -392,7 +415,7 @@ export function useEditorState(initialProjectId?: string | null) {
           const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
           const baseLayers: Layer[] = defaultLayers.map((l) =>
             l.type === "background" && bgUrl
-              ? { ...l, imageUrl: bgUrl, imgX: 0, imgY: 0, imgW: 800, imgH: 1100 }
+              ? { ...l, imageUrl: bgUrl }
               : { ...l }
           );
           if (cut.characterAssetUrl) {
@@ -405,10 +428,6 @@ export function useEditorState(initialProjectId?: string | null) {
               opacity: 100,
               blendMode: "normal",
               imageUrl: cut.characterAssetUrl,
-              imgX: 160,
-              imgY: 210,
-              imgW: 480,
-              imgH: 680,
             });
           }
           setLayers(baseLayers);
@@ -432,26 +451,7 @@ export function useEditorState(initialProjectId?: string | null) {
         setCanvasImages(Array.isArray(data.canvas_images) ? data.canvas_images : []);
       }
       if (data.layers) {
-        // 저장된 레이어에 cut의 thumbnail/asset URL을 병합 (loadCutData가 layer sync effect 결과를 덮어쓰는 race condition 방지)
-        const cut = cutsRef.current.find((c) => c.id === cutId);
-        let loadedLayers: Layer[] = Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : defaultLayers;
-        if (cut) {
-          loadedLayers = loadedLayers.map((l: Layer) => {
-            if (l.type === "background") {
-              const bgUrl = cut.backgroundAssetUrl || cut.thumbnail;
-              if (bgUrl && !l.imageUrl) {
-                const url = resolveImageUrl(bgUrl) ?? undefined;
-                return { ...l, imageUrl: url, imgX: l.imgX ?? 0, imgY: l.imgY ?? 0, imgW: l.imgW ?? 800, imgH: l.imgH ?? 1100 };
-              }
-            }
-            if (l.type === "character" && cut.characterAssetUrl && !l.imageUrl) {
-              const url = resolveImageUrl(cut.characterAssetUrl) ?? undefined;
-              return { ...l, imageUrl: url, imgX: l.imgX ?? 160, imgY: l.imgY ?? 210, imgW: l.imgW ?? 480, imgH: l.imgH ?? 680 };
-            }
-            return l;
-          });
-        }
-        setLayers(loadedLayers);
+        setLayers(Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : defaultLayers);
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -1037,6 +1037,28 @@ export function useEditorState(initialProjectId?: string | null) {
         backgroundAssetUrl: toAbsoluteImageUrl(p.backgroundAssetUrl) || undefined,
       }));
       setCuts((prev) => [...prev.filter((c) => c.episodeId !== epIdStr), ...refreshed]);
+
+      // AI 생성 완료된 이미지 → 선화 편집 탭(generatedImages)에도 자동 등록
+      const completedPanels = panels.filter((p) => p.status === "COMPLETED" && p.finalImageUrl);
+      if (completedPanels.length > 0) {
+        setGeneratedImages((prev) => {
+          const existingUrls = new Set(prev.map((img) => img.url));
+          const newImages: AIGeneratedImage[] = [];
+          for (const panel of completedPanels) {
+            const url = toAbsoluteImageUrl(panel.finalImageUrl);
+            if (url && !existingUrls.has(url)) {
+              newImages.push({
+                id: `ai-cut-${panel.panelId}`,
+                url,
+                prompt: panel.prompt || `컷 ${panel.panelOrder}`,
+                type: "generated",
+                timestamp: Date.now(),
+              });
+            }
+          }
+          return [...newImages, ...prev];
+        });
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[refreshCutsForEpisode] 실패:", err);
