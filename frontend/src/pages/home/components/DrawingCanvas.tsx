@@ -14,7 +14,6 @@ interface CanvasImageLayer {
   w: number;
   h: number;
   layerPosition?: number;
-  rotation?: number;
 }
 
 interface DrawingCanvasProps {
@@ -28,7 +27,7 @@ interface DrawingCanvasProps {
   onZoomOut: () => void;
   onResetZoom: () => void;
   canvasImages?: CanvasImageLayer[];
-  onUpdateCanvasImage?: (id: string, x: number, y: number, w: number, h: number, rotation?: number) => void;
+  onUpdateCanvasImage?: (id: string, x: number, y: number, w: number, h: number) => void;
   onDeleteCanvasImage?: (id: string) => void;
   onUpdateCanvasImageLayerPosition?: (id: string, direction: "up" | "down") => void;
   // stroke props
@@ -280,11 +279,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // 이미지 레이어 선택/드래그/리사이즈 상태
     const [selectedImgId, setSelectedImgId] = useState<string | null>(null);
     const imgDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-    const imgResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number; aspectRatio: number } | null>(null);
-    const imgRotateRef = useRef<{ startX: number; startY: number; origAngle: number; centerX: number; centerY: number } | null>(null);
+    const imgResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number } | null>(null);
     const [isDraggingImg, setIsDraggingImg] = useState(false);
     const [isResizingImg, setIsResizingImg] = useState(false);
-    const [isRotatingImg, setIsRotatingImg] = useState(false);
 
     // 캐릭터/배경 레이어 이미지 선택/드래그/리사이즈 상태
     const [selectedLayerImgIds, setSelectedLayerImgIds] = useState<string[]>([]);
@@ -366,17 +363,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               const el = new Image();
               el.crossOrigin = "anonymous";
               el.onload = () => {
-                ctx.save();
-                const cx = cimg.x + cimg.w / 2;
-                const cy = cimg.y + cimg.h / 2;
-                const cRotation = cimg.rotation ?? 0;
-                if (cRotation !== 0) {
-                  ctx.translate(cx, cy);
-                  ctx.rotate((cRotation * Math.PI) / 180);
-                  ctx.translate(-cx, -cy);
-                }
                 ctx.drawImage(el, cimg.x, cimg.y, cimg.w, cimg.h);
-                ctx.restore();
                 resolve();
               };
               el.onerror = () => resolve();
@@ -395,17 +382,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               const el = new Image();
               el.crossOrigin = "anonymous";
               el.onload = () => {
-                ctx.save();
-                const cx = img.x + img.w / 2;
-                const cy = img.y + img.h / 2;
-                const cRotation = img.rotation ?? 0;
-                if (cRotation !== 0) {
-                  ctx.translate(cx, cy);
-                  ctx.rotate((cRotation * Math.PI) / 180);
-                  ctx.translate(-cx, -cy);
-                }
                 ctx.drawImage(el, img.x, img.y, img.w, img.h);
-                ctx.restore();
                 resolve();
               };
               el.onerror = () => resolve();
@@ -961,24 +938,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         e.stopPropagation();
         const img = canvasImages.find((i) => i.id === imgId);
         if (!img) return;
-        const ratio = img.h > 0 ? img.w / img.h : 1;
-        imgResizeRef.current = { startX: e.clientX, startY: e.clientY, origW: img.w, origH: img.h, origX: img.x, origY: img.y, aspectRatio: ratio };
+        imgResizeRef.current = { startX: e.clientX, startY: e.clientY, origW: img.w, origH: img.h, origX: img.x, origY: img.y };
         setIsResizingImg(true);
       },
       [canvasImages]
-    );
-
-    const handleImgRotateMouseDown = useCallback(
-      (e: React.MouseEvent, imgId: string) => {
-        e.stopPropagation();
-        const img = canvasImages.find((i) => i.id === imgId);
-        if (!img) return;
-        const centerScreenX = (img.x + img.w / 2) * scale;
-        const centerScreenY = (img.y + img.h / 2) * scale;
-        imgRotateRef.current = { startX: e.clientX, startY: e.clientY, origAngle: img.rotation ?? 0, centerX: centerScreenX, centerY: centerScreenY };
-        setIsRotatingImg(true);
-      },
-      [canvasImages, scale]
     );
 
     const handleImgMouseMove = useCallback(
@@ -997,48 +960,19 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (isResizingImg && imgResizeRef.current && selectedImgId) {
           const dx = (e.clientX - imgResizeRef.current.startX) / scale;
           const dy = (e.clientY - imgResizeRef.current.startY) / scale;
-          const ratio = imgResizeRef.current.aspectRatio;
-          const useDx = Math.abs(dx) >= Math.abs(dy);
-          let newW: number, newH: number, newX: number, newY: number;
-          if (useDx) {
-            newW = Math.max(50, imgResizeRef.current.origW + dx);
-            newH = newW / ratio;
-            const dh2 = newH - imgResizeRef.current.origH;
-            newX = imgResizeRef.current.origX - dh2 / 2;
-            newY = imgResizeRef.current.origY - dh2 / 2;
-          } else {
-            newH = Math.max(50, imgResizeRef.current.origH + dy);
-            newW = newH * ratio;
-            const dw2 = newW - imgResizeRef.current.origW;
-            newX = imgResizeRef.current.origX - dw2 / 2;
-            newY = imgResizeRef.current.origY - dw2 / 2;
-          }
-          const clamped = clampToCanvas(newX, newY, newW, newH);
-          onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
-        }
-        if (isRotatingImg && imgRotateRef.current && selectedImgId) {
-          const { startX, startY, centerX, centerY, origAngle } = imgRotateRef.current;
-          const startAngle = Math.atan2(startY - centerY, startX - centerX);
-          const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-          const deltaDeg = ((currentAngle - startAngle) * 180) / Math.PI;
-          let newRotation = origAngle + deltaDeg;
-          newRotation = ((newRotation % 360) + 360) % 360;
-          const img = canvasImages.find((i) => i.id === selectedImgId);
-          if (img) {
-            onUpdateCanvasImage?.(selectedImgId, img.x, img.y, img.w, img.h, newRotation);
-          }
+          const newW = Math.max(50, imgResizeRef.current.origW + dx);
+          const newH = Math.max(50, imgResizeRef.current.origH + dy);
+          onUpdateCanvasImage?.(selectedImgId, imgResizeRef.current.origX, imgResizeRef.current.origY, newW, newH);
         }
       },
-      [isDraggingImg, isResizingImg, isRotatingImg, selectedImgId, scale, canvasImages, onUpdateCanvasImage]
+      [isDraggingImg, isResizingImg, selectedImgId, scale, canvasImages, onUpdateCanvasImage]
     );
 
     const handleImgMouseUp = useCallback(() => {
       setIsDraggingImg(false);
       setIsResizingImg(false);
-      setIsRotatingImg(false);
       imgDragRef.current = null;
       imgResizeRef.current = null;
-      imgRotateRef.current = null;
     }, []);
 
     // ── 레이어 이미지(캐릭터/배경) 핸들러 ──
@@ -1196,28 +1130,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setTextValue("");
     }, [textInput, textValue, brushSize, foregroundColor, opacity]);
 
-    // 마우스 휠로 선택된 이미지 확대/축소 (레이어 이미지 + AI 이미지)
+    // 마우스 휠로 캐릭터 레이어 이미지 확대/축소
     const handleWheel = useCallback(
       (e: React.WheelEvent) => {
-        // AI 이미지(캔버스 이미지)가 선택된 경우
-        if (selectedImgId) {
-          e.preventDefault();
-          const img = canvasImages.find((i) => i.id === selectedImgId);
-          if (!img) return;
-
-          const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-          const newW = Math.max(50, Math.min(2000, img.w * zoomFactor));
-          const newH = Math.max(50, Math.min(2000, img.h * zoomFactor));
-          const dw = newW - img.w;
-          const dh = newH - img.h;
-          const newX = img.x - dw / 2;
-          const newY = img.y - dh / 2;
-          const clamped = clampToCanvas(newX, newY, newW, newH);
-          onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
-          return;
-        }
-
-        // 레이어 이미지(배경/캐릭터)가 선택된 경우
         if (selectedLayerImgIds.length === 0) return;
 
         e.preventDefault();
@@ -1238,7 +1153,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           onUpdateLayerImage?.(id, clamped.x, clamped.y, newW, newH);
         }
       },
-      [selectedImgId, selectedLayerImgIds, canvasImages, layers, onUpdateCanvasImage, onUpdateLayerImage]
+      [selectedLayerImgIds, layers, onUpdateLayerImage]
     );
 
     const isBalloonInteractive = activeTool === "balloon" || activeTool === "select" || activeTool === "move";
@@ -1284,22 +1199,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setIsPinching(false);
     }, []);
 
-    // 이미지 선택 시 캔버스 커서를 강제로 grabbing 유지 (React state 타이밍 이슈 방지)
-    useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const hasSelectedImage = selectedImgId !== null || selectedLayerImgIds.length > 0;
-      if (hasSelectedImage) {
-        canvas.style.cursor = "grabbing";
-      }
-    }, [selectedImgId, selectedLayerImgIds]);
-
     const getCursor = () => {
       if (isDraggingImg || isDraggingLayerImg) return "grabbing";
       if (isResizingImg || isResizingLayerImg) return "nwse-resize";
-      if (isRotatingImg || isRotatingLayerImg) return "grabbing";
+      if (isRotatingLayerImg) return "grabbing";
       if (isMovingStrokes) return "grabbing";
-      if (selectedImgId || selectedLayerImgIds.length > 0) return "grabbing";
       if (activeTool === "stroke-select") return "default";
       if (activeTool === "stroke-eraser") return "crosshair";
       if (activeTool === "balloon") return "crosshair";
@@ -1425,52 +1329,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               </div>
             )}
 
-            {selectedImgId && (() => {
-              const selImg = canvasImages.find((i) => i.id === selectedImgId);
-              const siw = selImg?.w ?? 400;
-              const sih = selImg?.h ?? 400;
-              const siRotation = selImg?.rotation ?? 0;
-              const handleImgZoom = (factor: number) => {
-                if (!selImg) return;
-                const newW = Math.max(50, Math.min(2000, selImg.w * factor));
-                const newH = Math.max(50, Math.min(2000, selImg.h * factor));
-                const dw = newW - selImg.w;
-                const dh = newH - selImg.h;
-                const clamped = clampToCanvas(selImg.x - dw / 2, selImg.y - dh / 2, newW, newH);
-                onUpdateCanvasImage?.(selectedImgId, clamped.x, clamped.y, newW, newH);
-              };
-              return (
+            {selectedImgId && (
               <div className="flex items-center gap-1.5 px-2 h-6 bg-orange-500/10 rounded text-[10px] text-orange-400 whitespace-nowrap shrink-0">
                 <i className="ri-image-line" />
-                드래그: 이동 · 휠·핸들: 확대축소/회전
-                <span className="w-px h-3 bg-[#333] mx-0.5" />
-                <button
-                  onClick={() => handleImgZoom(0.9)}
-                  title="축소"
-                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
-                >
-                  <i className="ri-zoom-out-line" />
-                </button>
-                <span className="text-[9px] text-[#ccc] font-mono">{Math.round(siw)}×{Math.round(sih)}</span>
-                <button
-                  onClick={() => handleImgZoom(1.1)}
-                  title="확대"
-                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
-                >
-                  <i className="ri-zoom-in-line" />
-                </button>
-                <span className="w-px h-3 bg-[#333] mx-0.5" />
-                <button
-                  onClick={() => {
-                    if (!selImg) return;
-                    const newRotation = ((siRotation + 15) % 360);
-                    onUpdateCanvasImage?.(selectedImgId, selImg.x, selImg.y, selImg.w, selImg.h, newRotation);
-                  }}
-                  title="15° 회전"
-                  className="px-1.5 py-0.5 bg-[#2a2a2a] text-[#aaa] rounded text-[9px] cursor-pointer hover:bg-[#333] transition-colors whitespace-nowrap"
-                >
-                  <i className="ri-loop-right-line" />
-                </button>
+                드래그: 이동 · 우하단 핸들: 크기조절
                 <span className="w-px h-3 bg-[#333] mx-0.5" />
                 <button
                   onClick={() => onUpdateCanvasImageLayerPosition?.(selectedImgId, "up")}
@@ -1489,14 +1351,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 </button>
                 <span className="w-px h-3 bg-[#333] mx-0.5" />
                 <button
-                  onClick={() => { onDeleteCanvasImage?.(selectedImgId); setSelectedImgId(null); }}
+                  onClick={() => { onDeleteCanvasImage?.(selectedImgId); setSelectedImgId(null); setSelectedLayerImgIds([]); }}
                   className="ml-1 px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded text-[9px] cursor-pointer hover:bg-red-500/30 transition-colors whitespace-nowrap"
                 >
                   <i className="ri-delete-bin-line" /> 삭제
                 </button>
               </div>
-              );
-            })()}
+            )}
 
             {selectedLayerImgIds.length > 0 && (() => {
               const selLayer = layers.find((l) => l.id === selectedLayerImgIds[0]);
@@ -1721,7 +1582,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             {canvasImages.map((img) => {
               const isSelected = selectedImgId === img.id;
               const canvasImgZ = 2 + (img.layerPosition ?? layers.length);
-              const imgRotation = img.rotation ?? 0;
               return (
                 <div
                   key={img.id}
@@ -1733,10 +1593,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                     height: img.h * scale,
                     zIndex: canvasImgZ,
                     outline: isSelected ? "2px solid #f97316" : "none",
-                    outlineOffset: "1px",
-                    cursor: isSelected ? "grabbing" : "grab",
-                    transformOrigin: "center center",
-                    transform: imgRotation !== 0 ? `rotate(${imgRotation}deg)` : "none",
+                    cursor: isDraggingImg && isSelected ? "grabbing" : "grab",
                   }}
                   onMouseDown={(e) => handleImgMouseDown(e, img.id)}
                   onClick={(e) => e.stopPropagation()}
@@ -1759,12 +1616,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                       >
                         <i className="ri-arrow-right-down-line text-white" style={{ fontSize: 8 }} />
                       </div>
-                      <div
-                        className="absolute -top-6 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full border-2 border-white cursor-grab flex items-center justify-center"
-                        onMouseDown={(e) => { e.stopPropagation(); handleImgRotateMouseDown(e, img.id); }}
-                      >
-                        <i className="ri-loop-right-line text-white" style={{ fontSize: 7 }} />
-                      </div>
                       <button
                         className="absolute -top-3 -right-3 w-5 h-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center cursor-pointer z-10"
                         onMouseDown={(e) => e.stopPropagation()}
@@ -1773,7 +1624,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                         <i className="ri-close-line text-white" style={{ fontSize: 9 }} />
                       </button>
                       <div className="absolute -bottom-5 left-0 text-[9px] text-orange-400 whitespace-nowrap bg-[#111]/80 px-1 rounded">
-                        {Math.round(img.w)} × {Math.round(img.h)}{imgRotation !== 0 ? ` · ${Math.round(imgRotation)}°` : ""}
+                        {Math.round(img.w)} × {Math.round(img.h)}
                       </div>
                     </>
                   )}
