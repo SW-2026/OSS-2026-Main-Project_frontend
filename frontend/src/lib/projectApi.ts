@@ -49,6 +49,6 @@ export async function createProject(
   return res.data.data;
 }
 
-export async function deleteProject(projectId: number): Promise<void> {
+export async function deleteProject(projectId: string): Promise<void> {
   await api.delete(`/api/projects/${projectId}`);
 }
