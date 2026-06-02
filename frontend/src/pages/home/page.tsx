@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { listProjects, createProject, deleteProject } from "@/lib/projectApi";
+import { listProjects, createProject } from "@/lib/projectApi";
 
 interface Project {
   id: string;
@@ -21,7 +21,6 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -92,18 +91,11 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleDeleteProject = async () => {
+  const handleDeleteProject = () => {
     if (!deleteTargetId) return;
-    setIsDeleting(true);
-    try {
-      await deleteProject(deleteTargetId);
-      setProjects((prev) => prev.filter((p) => p.id !== deleteTargetId));
-      setDeleteTargetId(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message ?? "프로젝트 삭제 중 오류가 발생했습니다.");
-    } finally {
-      setIsDeleting(false);
-    }
+    // 백엔드 호출 없이 로컬 state에서만 제거
+    setProjects((prev) => prev.filter((p) => p.id !== deleteTargetId));
+    setDeleteTargetId(null);
   };
 
   return (
@@ -171,21 +163,19 @@ export default function ProjectsPage() {
             {deleteTargetId && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
                 <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-5 w-80 shadow-2xl">
-                  <p className="text-xs text-[#ccc] font-semibold mb-1">프로젝트 삭제</p>
+                  <p className="text-xs text-[#ccc] font-semibold mb-1">프로젝트 숨기기</p>
                   <p className="text-[11px] text-[#888] mb-4">
-                    <span className="text-orange-400">{projects.find((p) => p.id === deleteTargetId)?.title}</span> 프로젝트를 삭제하시겠습니까? 모든 에피소드와 컷이 함께 삭제되며 복구할 수 없습니다.
+                    <span className="text-orange-400">{projects.find((p) => p.id === deleteTargetId)?.title}</span> 프로젝트를 목록에서 제거하시겠습니까?
                   </p>
                   <div className="flex gap-2">
                     <button
                       onClick={handleDeleteProject}
-                      disabled={isDeleting}
-                      className="flex-1 h-8 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50"
+                      className="flex-1 h-8 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg cursor-pointer transition-colors whitespace-nowrap"
                     >
-                      {isDeleting ? "삭제 중..." : "삭제"}
+                      삭제
                     </button>
                     <button
                       onClick={() => setDeleteTargetId(null)}
-                      disabled={isDeleting}
                       className="flex-1 h-8 bg-[#2a2a2a] hover:bg-[#333] text-[#aaa] text-xs rounded-lg cursor-pointer transition-colors whitespace-nowrap"
                     >
                       취소
