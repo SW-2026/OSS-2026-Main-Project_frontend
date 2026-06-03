@@ -232,7 +232,7 @@ export default function ScenarioGeneratePanel({
       const summary = characters.find((c) => c.modelId === id);
       return {
         modelId: id,
-        modelName: summary?.modelName ?? detail?.modelName ?? `캐릭터 ${id}`,
+        name: summary?.modelName ?? detail?.modelName ?? `캐릭터 ${id}`,
         triggerWord: detail?.triggerWord ?? null,
         loraModelPath: detail?.loraModelPath ?? null,
       };
