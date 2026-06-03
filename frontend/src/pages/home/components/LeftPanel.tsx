@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { mockPresets } from "@/mocks/webtoon";
+import { mockCharacters, mockBackgrounds, mockPresets } from "@/mocks/webtoon";
 import { listLoras, createCharacterFromLora, type LoraCatalogItem, type CharacterModelDetail } from "@/lib/characterApi";
 import { listBackgrounds, type BackgroundAssetSummary } from "@/lib/backgroundApi";
 import type { DrawingTool } from "@/hooks/useEditorState";
@@ -9,8 +9,6 @@ import ImagePanel from "./ImagePanel";
 import type { AIGeneratedImage } from "./ImagePanel";
 import AiTab from "./AiTab";
 import BackgroundLibraryPanel from "./BackgroundLibraryPanel";
-import LoraRequestModal from "./LoraRequestModal";
-import LoraHistoryModal from "./LoraHistoryModal";
 
 type TabType = "tool" | "library" | "image" | "balloon" | "ai" | "background";
 
@@ -160,9 +158,6 @@ export default function LeftPanel({
 
   const [pendingBackgroundAssetId, setPendingBackgroundAssetId] = useState<number | null>(null);
 
-  const [showLoraModal, setShowLoraModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-
   const loraCards = loras.map((l) => ({
     id: `lora-${l.id}`,
     name: l.displayName,
@@ -189,6 +184,8 @@ export default function LeftPanel({
   ];
 
   const filteredItems = [
+    ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? mockCharacters : []),
+    ...(libraryFilter === "전체" || libraryFilter === "배경" ? mockBackgrounds : []),
     ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? loraCards : []),
     ...(libraryFilter === "전체" || libraryFilter === "배경" ? backgroundCards : []),
   ].filter(
@@ -374,22 +371,6 @@ export default function LeftPanel({
               <input value={librarySearch} onChange={(e) => setLibrarySearch(e.target.value)} placeholder="소재 검색..." className="w-full h-8 bg-[#1e1e1e] border border-[#2a2a2a] rounded-lg pl-8 pr-3 text-xs text-[#ccc] placeholder-[#444] outline-none focus:border-orange-500/50" />
             </div>
           </div>
-          <div className="flex gap-2 px-3 pb-2 shrink-0">
-            <button
-              onClick={() => setShowLoraModal(true)}
-              className="flex-1 flex items-center justify-center gap-1 h-8 rounded-lg border border-orange-500/40 text-orange-400 text-[11px] font-medium hover:bg-orange-500/10 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <i className="ri-add-line text-sm" />
-              LoRA 신청
-            </button>
-            <button
-              onClick={() => setShowHistoryModal(true)}
-              className="flex-1 flex items-center justify-center gap-1 h-8 rounded-lg bg-[#222] text-[#888] text-[11px] hover:text-[#ccc] hover:bg-[#2a2a2a] transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <i className="ri-history-line text-sm" />
-              내 신청 내역
-            </button>
-          </div>
           <div className="flex gap-1 px-3 pb-2 shrink-0">
             {(["전체", "캐릭터", "배경"] as const).map((f) => (
               <button key={f} onClick={() => setLibraryFilter(f)} className={`px-2.5 py-1 rounded-full text-[10px] transition-colors cursor-pointer whitespace-nowrap ${libraryFilter === f ? "bg-orange-500 text-white" : "bg-[#222] text-[#888] hover:bg-[#2a2a2a]"}`}>{f}</button>
@@ -477,26 +458,6 @@ export default function LeftPanel({
 
       {/* 배경 라이브러리 탭 — backend background-assets API */}
       {activeTab === "background" && <BackgroundLibraryPanel />}
-
-      {/* LoRA 신청 모달 */}
-      {showLoraModal && (
-        <LoraRequestModal
-          projectId={activeProjectId}
-          onClose={() => setShowLoraModal(false)}
-          onSuccess={(created) => {
-            setPendingCharacter(created);
-            setActiveTab("ai");
-          }}
-        />
-      )}
-
-      {/* 내 신청 내역 모달 */}
-      {showHistoryModal && (
-        <LoraHistoryModal
-          projectId={activeProjectId}
-          onClose={() => setShowHistoryModal(false)}
-        />
-      )}
     </aside>
   );
 }
