@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { mockCharacters, mockBackgrounds, mockPresets } from "@/mocks/webtoon";
+import { mockPresets } from "@/mocks/webtoon";
 import { listLoras, createCharacterFromLora, type LoraCatalogItem, type CharacterModelDetail } from "@/lib/characterApi";
 import { listBackgrounds, type BackgroundAssetSummary } from "@/lib/backgroundApi";
 import type { DrawingTool } from "@/hooks/useEditorState";
@@ -184,8 +184,6 @@ export default function LeftPanel({
   ];
 
   const filteredItems = [
-    ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? mockCharacters : []),
-    ...(libraryFilter === "전체" || libraryFilter === "배경" ? mockBackgrounds : []),
     ...(libraryFilter === "전체" || libraryFilter === "캐릭터" ? loraCards : []),
     ...(libraryFilter === "전체" || libraryFilter === "배경" ? backgroundCards : []),
   ].filter(
